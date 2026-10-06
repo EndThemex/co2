@@ -1,0 +1,306 @@
+# ==============================================================================
+# 空气质量监测仪 — ESPHome 配置（方案1：纯 YAML 全迁移，原 Arduino 版本完整移植）
+#
+# Author: EndTheme
+#
+# 硬件: ESP32-C3 (LuAT airm2m_core_esp32c3) + AHT30 + ENS160 + SSD1306 128x64 OLED
+# 接线: I2C SDA=GPIO8, SCL=GPIO9（与原 main.cpp 一致）
+#
+# 逻辑对应关系（原 main.cpp → 本文件）:
+#   - AHT30 手写直读 readAHT30()       → sensor: platform: aht10 (variant: AHT20，
+#                                         AHT30 官方文档明确支持，协议同 AHT20)
+#   - ENS160 SparkFun 库               → sensor: platform: ens160_i2c (地址 0x53)
+#   - 原始温湿度喂 ENS160 补偿          → ens160 的 compensation 块（引用原始传感器 ID）
+#   - TEMP/HUM_OFFSET_TABLE 分段偏移    → copy 传感器 + lambda filter（仅校准值出 HA/OLED）
+#   - ui_pages.cpp 双页 UI             → display pages + lambda 重绘（布局常量照搬 ui_layout.h）
+#   - PAGE_INTERVAL_MS 8000 翻页       → interval: 8s + display.page.show_next
+#   - aqiShort()/comfortText()         → text_sensor: platform: template（同时供 HA 与屏幕用）
+#
+# 接入 HomeAssistant: HA 中添加 "ESPHome" 集成 → 自动发现本设备 → 输入 API 密钥即可
+# ==============================================================================
+
+substitutions:
+  name: co2-monitor
+  friendly_name: 空气质量监测仪
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: airm2m_core_esp32c3
+  variant: esp32c3
+  framework:
+    type: arduino
+
+# 日志走板载 USB Serial/JTAG 口（原代码的 ARDUINO_USB_CDC_ON_BOOT 效果，
+# ESPHome 原生支持，无需手动加 build_flags）
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+  level: DEBUG
+
+# HomeAssistant 原生接入
+api:
+  encryption:
+    key: !secret api_key
+
+# OTA 用 API 密钥加密（推荐做法，无密码；复用 api.encryption.key）
+ota:
+  - platform: esphome
+    encryption:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${name} Setup"
+    password: "12345678"
+
+captive_portal:
+
+# USB 配网（Improv 标准）：设备没连上 WiFi 时，用 Chrome/Edge 打开
+# https://improv-wifi.com 连接 USB 串口即可输入 WiFi，无需改 YAML/重新刷机
+improv_serial:
+
+# ==============================================================================
+# I2C 总线：SDA=8, SCL=9, 100kHz（与原代码一致）
+# ==============================================================================
+i2c:
+  sda: 8
+  scl: 9
+  frequency: 100kHz
+  scan: true
+
+# ==============================================================================
+# 字体（本地 TTF，已下载到 fonts/ 目录；gfonts 在线获取在国内网络不可用）
+# Press Start 2P 像素字体：按 8px 网格设计，size 取 8 的整数倍时最锐利
+# font_big   = 16px（每字符占宽 16px）
+# font_small =  8px（每字符占宽 8px，比原等宽字体宽，右侧单位改用 TOP_RIGHT 靠右对齐）
+# ==============================================================================
+font:
+  - file: "fonts/PressStart2P-Regular.ttf"
+    id: font_small
+    size: 8
+    glyphs: "!%+,-./0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ°abcdefghijklmnopqrstuvwxyz"
+  - file: "fonts/RobotoMono-Regular.ttf"
+    id: font_mid
+    size: 16
+    glyphs: "!%+,-./0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ°abcdefghijklmnopqrstuvwxyz"
+  - file: "fonts/PressStart2P-Regular.ttf"
+    id: font_big
+    size: 16
+    glyphs: "!%+,-./0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ°abcdefghijklmnopqrstuvwxyz"
+  # 中文像素字体（缝合像素 Fusion Pixel 12px 点阵，OFL 开源，与 Press Start 2P 风格一致）
+  # 只嵌入界面用到的汉字，固件体积几乎不变（源 TTF 7MB 不会进固件）
+  - file: "fonts/fusion-pixel-12px-monospaced-zh_hans.ttf"
+    id: font_cn
+    size: 12
+    glyphs: "温湿度空气质量冷干潮舒适正常预热中优良差劣未知."
+  - file: "fonts/fusion-pixel-12px-monospaced-zh_hans.ttf"
+    id: font_cn_big
+    size: 24
+    glyphs: "预热中"
+
+# ==============================================================================
+# 传感器
+# ==============================================================================
+sensor:
+  # ---- AHT30 原始温湿度（仅内部使用：喂 ENS160 补偿，不发布到 HA）----
+  - platform: aht10
+    variant: AHT20        # AHT30 使用 AHT20 variant（协议相同，官方支持）
+    temperature:
+      id: aht_raw_temp
+      internal: true
+    humidity:
+      id: aht_raw_hum
+      internal: true
+    update_interval: 2s
+
+  # ---- ENS160 空气质量（地址 0x53 = SparkFun 库默认值 ENS160_ADDRESS_HIGH）----
+  - platform: ens160_i2c
+    address: 0x53
+    update_interval: 2s
+    # 对应原代码: ens160.setTempCompensationCelsius / setRHCompensationFloat
+    # 注意：补偿吃的是"原始值"，与原设计一致（同一热环境反而更准）
+    compensation:
+      temperature: aht_raw_temp
+      humidity: aht_raw_hum
+    eco2:
+      id: eco2
+      name: "eCO2"
+      device_class: carbon_dioxide
+      state_class: measurement
+      unit_of_measurement: "ppm"
+    tvoc:
+      id: tvoc
+      name: "TVOC"
+      device_class: volatile_organic_compounds
+      state_class: measurement
+      unit_of_measurement: "ppb"
+    aqi:
+      id: aqi
+      name: "AQI"
+      state_class: measurement
+      accuracy_decimals: 0
+
+  # ---- 校准温度（对应原 TEMP_OFFSET_TABLE 分段偏移）→ 发布到 HA + OLED ----
+  - platform: copy
+    source_id: aht_raw_temp
+    id: temp_disp
+    name: "Temperature"
+    device_class: temperature
+    state_class: measurement
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    filters:
+      - lambda: |-
+          // 原始温度 ≤15°C: -4.5 | 15~25°C: -7.0 | >25°C: -8.0
+          if (x <= 15.0f) return x - 4.5f;
+          if (x <= 25.0f) return x - 7.0f;
+          return x - 8.0f;
+
+  # ---- 校准湿度（对应原 HUM_OFFSET_TABLE 分段偏移 + constrain 0~100）----
+  - platform: copy
+    source_id: aht_raw_hum
+    id: hum_disp
+    name: "Humidity"
+    device_class: humidity
+    state_class: measurement
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    filters:
+      - lambda: |-
+          // 原始湿度 ≤40%: +18 | 40~70%: +12 | >70%: +8
+          if (x <= 40.0f) return x + 20.0f;
+          if (x <= 70.0f) return x + 14.0f;
+          return x + 10.0f;
+      - clamp:
+          min_value: 0
+          max_value: 100
+
+# ==============================================================================
+# 文本传感器：AQI 等级（原 aqiShort()）与舒适度（原 comfortText()）
+# 供 HA 卡片和 OLED 页脚使用
+# ==============================================================================
+text_sensor:
+  - platform: template
+    id: aqi_text
+    name: "Air Quality Rating"
+    lambda: |-
+      if (isnan(id(aqi).state)) return {"Unknown"};
+      switch ((int) id(aqi).state) {
+        case 1: return {"Excellent"};
+        case 2: return {"Good"};
+        case 3: return {"Moderate"};
+        case 4: return {"Poor"};
+        case 5: return {"Unhealthy"};
+        default: return {"Unknown"};
+      }
+    update_interval: 2s
+
+  - platform: template
+    id: comfort_text
+    name: "Comfort Status"
+    lambda: |-
+      float t = id(temp_disp).state;
+      float h = id(hum_disp).state;
+      if (isnan(t) || isnan(h)) return {"Unknown"};
+      if (t < 18.0f) return {"Cold"};
+      if (t > 28.0f) return {"Hot"};
+      if (h < 30.0f) return {"Dry"};
+      if (h > 70.0f) return {"Humid"};
+      if (t >= 20.0f && t <= 26.0f && h >= 40.0f && h <= 60.0f) return {"Comfort"};
+      return {"OK"};
+    update_interval: 2s
+
+# ==============================================================================
+# OLED：SSD1306 128x64 @ 0x3C，双页轮播（布局常量照搬 ui_layout.h）
+#   标签/状态用 font_cn 中文 12px，数字 font_big 16px，单位/页码 font_small 8px
+#   数字右对齐：温湿度页 [..110]，空气质量页 [..100]，AQI [..40]
+#   单位列统一 TOP_RIGHT 对齐屏幕右缘 x=128
+# ==============================================================================
+display:
+  - platform: ssd1306_i2c
+    id: oled
+    model: "SSD1306 128x64"
+    address: 0x3C
+    update_interval: 1s
+    pages:
+      # ---- Page 1 "温湿度"（原 draw_climate）----
+      - id: page_climate
+        lambda: |-
+          // 页眉：中文标题 + 右对齐页码 + 分隔线（中文 12px 占 y 0..11）
+          it.print(0, 0, id(font_cn), "温湿度");
+          it.printf(128, 2, id(font_small), TextAlign::TOP_RIGHT, "1/2");
+          it.line(0, 13, 127, 13);
+          // Temp 行：数字右对齐到 x=110，单位靠右缘
+          it.print(0, 17, id(font_cn), "温度");
+          float t = id(temp_disp).state;
+          if (isnan(t))
+            it.printf(110, 15, id(font_big), TextAlign::TOP_RIGHT, "--.-");
+          else
+            it.printf(110, 15, id(font_big), TextAlign::TOP_RIGHT, "%.1f", t);
+          it.printf(128, 15, id(font_mid), TextAlign::TOP_RIGHT, "°C");
+          // Humidity 行
+          it.print(0, 35, id(font_cn), "湿度");
+          float h = id(hum_disp).state;
+          if (isnan(h))
+            it.printf(110, 33, id(font_big), TextAlign::TOP_RIGHT, "--.-");
+          else
+            it.printf(110, 33, id(font_big), TextAlign::TOP_RIGHT, "%.1f", h);
+          it.print(128, 33, id(font_mid), TextAlign::TOP_RIGHT, "%");
+          // 底部舒适度状态（text_sensor 保持英文供 HA 用，屏显映射为中文）
+          std::string c = id(comfort_text).state;
+          const char* cc = "未知";
+          if (c == "Cold") cc = "冷";
+          else if (c == "Hot") cc = "热";
+          else if (c == "Dry") cc = "干";
+          else if (c == "Humid") cc = "潮";
+          else if (c == "Comfort") cc = "舒适";
+          else if (c == "OK") cc = "正常";
+          it.printf(0, 52, id(font_cn), "%s", cc);
+
+      # ---- Page 2 "空气质量"（原 draw_air）----
+      - id: page_air
+        lambda: |-
+          it.print(0, 0, id(font_cn), "空气质量");
+          it.printf(128, 2, id(font_small), TextAlign::TOP_RIGHT, "2/2");
+          it.line(0, 13, 127, 13);
+          // ENS160 每次上电需约 3 分钟预热，预热期间读数为 NaN：整页显示提示
+          if (isnan(id(eco2).state)) {
+            it.printf(64, 26, id(font_cn_big), TextAlign::CENTER, "预热中");
+            return;
+          }
+          // eCO2 行：数字右对齐到 x=100，单位靠右缘
+          it.print(0, 19, id(font_small), "eCO2");
+          it.printf(100, 15, id(font_big), TextAlign::TOP_RIGHT, "%d", (int) id(eco2).state);
+          it.printf(128, 23, id(font_small), TextAlign::TOP_RIGHT, "ppm");
+          // TVOC 行
+          it.print(0, 37, id(font_small), "TVOC");
+          it.printf(100, 33, id(font_big), TextAlign::TOP_RIGHT, "%d", (int) id(tvoc).state);
+          it.printf(128, 41, id(font_small), TextAlign::TOP_RIGHT, "ppb");
+          // AQI 行：数字右对齐到 x=40，中文等级右对齐到屏幕右缘
+          it.print(0, 55, id(font_small), "AQI");
+          if (id(aqi).state >= 1.0f && id(aqi).state <= 5.0f)
+            it.printf(40, 46, id(font_mid), TextAlign::TOP_RIGHT, "%d", (int) id(aqi).state);
+          else
+            it.printf(40, 46, id(font_mid), TextAlign::TOP_RIGHT, "-");
+          const std::string& r = id(aqi_text).state;
+          const char* rc = "未知";
+          if (r == "Excellent") rc = "优";
+          else if (r == "Good") rc = "良";
+          else if (r == "Moderate") rc = "中";
+          else if (r == "Poor") rc = "差";
+          else if (r == "Unhealthy") rc = "劣";
+          it.printf(128, 51, id(font_cn), TextAlign::TOP_RIGHT, "%s", rc);
+
+# 8 秒自动翻页（对应 PAGE_INTERVAL_MS 8000）
+interval:
+  - interval: 8s
+    then:
+      - display.page.show_next: oled
+
+# 重启开关（可选，HA 里也能点）
+button:
+  - platform: restart
+    name: "Restart ${friendly_name}"

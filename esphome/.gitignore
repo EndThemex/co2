@@ -1,0 +1,23 @@
+# Gitignore settings for ESPHome
+# This is an example and may include too much for your use-case.
+# You can modify this file to suit your needs.
+
+# 编译缓存：默认全部忽略，只保留固件产物 (.bin)
+.esphome/*
+!.esphome/build/
+.esphome/build/*
+!.esphome/build/co2-monitor/
+.esphome/build/co2-monitor/*
+!.esphome/build/co2-monitor/build/
+.esphome/build/co2-monitor/build/*
+!.esphome/build/co2-monitor/build/*.bin
+!.esphome/build/co2-monitor/build/bootloader/
+.esphome/build/co2-monitor/build/bootloader/*
+!.esphome/build/co2-monitor/build/bootloader/bootloader.bin
+!.esphome/build/co2-monitor/build/partition_table/
+.esphome/build/co2-monitor/build/partition_table/*
+!.esphome/build/co2-monitor/build/partition_table/partition-table.bin
+
+# 密钥与编译日志
+secrets.yaml
+*.log

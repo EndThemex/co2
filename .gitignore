@@ -1,0 +1,18 @@
+# PlatformIO
+.pio
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+# ESPHome：构建缓存与凭证（凭证绝不入库）
+esphome/.esphome/
+esphome/secrets.yaml
+
+# UI 模拟器编译产物
+tools/*.obj
+tools/obj/
+
+# 系统杂项
+Thumbs.db
+.DS_Store
