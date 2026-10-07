@@ -13,6 +13,8 @@
 #   - 原始温湿度喂 ENS160 补偿          → ens160 的 compensation 块（引用原始传感器 ID）
 #   - TEMP/HUM_OFFSET_TABLE 分段偏移    → copy 传感器 + lambda filter（仅校准值出 HA/OLED）
 #   - ui_pages.cpp 双页 UI             → display pages + lambda 重绘（布局常量照搬 ui_layout.h）
+#   - Ui::Face 表情引擎（ui_face.cpp   → esphome.includes 原样编译 + face_canvas.h 适配器，
+#     + IrisOLED 位图，硬件无关）         作为第 3 页轮播（引擎代码零改动）
 #   - PAGE_INTERVAL_MS 8000 翻页       → interval: 8s + display.page.show_next
 #   - aqiShort()/comfortText()         → text_sensor: platform: template（同时供 HA 与屏幕用）
 #
@@ -26,6 +28,19 @@ substitutions:
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
+  # 固件版表情引擎原样复用：以下文件按文件名拷入固件 src/ 并被自动
+  # include/编译进 main.cpp。ui_pages.cpp 提供 comfort_category()，
+  # Face 的情绪判定依赖它；face_canvas.h 是 ESPHome Display → Ui::Canvas
+  # 的适配器（约 40 行，见该文件头注释）。
+  includes:
+    - ../include/ui_canvas.h
+    - ../include/ui_layout.h
+    - ../include/ui_pages.h
+    - ../include/ui_face.h
+    - ../include/ui_face_bitmaps.h
+    - ../src/ui_face.cpp
+    - ../src/ui_pages.cpp
+    - face_canvas.h
 
 esp32:
   board: airm2m_core_esp32c3
@@ -63,12 +78,14 @@ captive_portal:
 improv_serial:
 
 # ==============================================================================
-# I2C 总线：SDA=8, SCL=9, 100kHz（与原代码一致）
+# I2C 总线：SDA=8, SCL=9
+# 数据页 100kHz 足够，但表情页 5fps 全帧推送（1KB/帧）在 100kHz 下每次占
+# ~92ms 总线时间，提到 400kHz 后仅 ~23ms（SSD1306 官方支持 400kHz）。
 # ==============================================================================
 i2c:
   sda: 8
   scl: 9
-  frequency: 100kHz
+  frequency: 400kHz
   scan: true
 
 # ==============================================================================
@@ -154,10 +171,11 @@ sensor:
     accuracy_decimals: 1
     filters:
       - lambda: |-
-          // 原始温度 ≤15°C: -4.5 | 15~25°C: -7.0 | >25°C: -8.0
-          if (x <= 15.0f) return x - 4.5f;
-          if (x <= 25.0f) return x - 7.0f;
-          return x - 8.0f;
+          // 原始温度 ≤15°C: -4.5 | 15~25°C: -6.0 | 25~30°C: -7.0 | 30~°C: -8.0
+          if (x <= 15.0f) return x - 4.0f;
+          if (x <= 25.0f) return x - 5.0f;
+          if (x <= 30.0f) return x - 6.0f;
+          return x - 7.0f;
 
   # ---- 校准湿度（对应原 HUM_OFFSET_TABLE 分段偏移 + constrain 0~100）----
   - platform: copy
@@ -170,10 +188,11 @@ sensor:
     accuracy_decimals: 0
     filters:
       - lambda: |-
-          // 原始湿度 ≤40%: +18 | 40~70%: +12 | >70%: +8
-          if (x <= 40.0f) return x + 20.0f;
-          if (x <= 70.0f) return x + 14.0f;
-          return x + 10.0f;
+          // 原始湿度 ≤40%: +14.0 | 40~70%: +12.0 | 70%: +7.0
+          if (x <= 40.0f) return x + 13.0f;
+          if (x <= 55.0f) return x + 11.5f;
+          if (x <= 70.0f) return x + 10.0f;
+          return x + 7.0f;
       - clamp:
           min_value: 0
           max_value: 100
@@ -214,24 +233,26 @@ text_sensor:
     update_interval: 2s
 
 # ==============================================================================
-# OLED：SSD1306 128x64 @ 0x3C，双页轮播（布局常量照搬 ui_layout.h）
+# OLED：SSD1306 128x64 @ 0x3C，三页轮播（布局常量照搬 ui_layout.h）
 #   标签/状态用 font_cn 中文 12px，数字 font_big 16px，单位/页码 font_small 8px
 #   数字右对齐：温湿度页 [..110]，空气质量页 [..100]，AQI [..40]
 #   单位列统一 TOP_RIGHT 对齐屏幕右缘 x=128
+#   刷新 200ms（5fps）：数据页重绘开销可忽略；表情页需要 —— 眨眼/眨眼变体
+#   窗口 240ms > 周期 200ms，保证每个动画帧至少被采样一次
 # ==============================================================================
 display:
   - platform: ssd1306_i2c
     id: oled
     model: "SSD1306 128x64"
     address: 0x3C
-    update_interval: 1s
+    update_interval: 200ms
     pages:
       # ---- Page 1 "温湿度"（原 draw_climate）----
       - id: page_climate
         lambda: |-
           // 页眉：中文标题 + 右对齐页码 + 分隔线（中文 12px 占 y 0..11）
           it.print(0, 0, id(font_cn), "温湿度");
-          it.printf(128, 2, id(font_small), TextAlign::TOP_RIGHT, "1/2");
+          it.printf(128, 2, id(font_small), TextAlign::TOP_RIGHT, "1/3");
           it.line(0, 13, 127, 13);
           // Temp 行：数字右对齐到 x=110，单位靠右缘
           it.print(0, 17, id(font_cn), "温度");
@@ -264,7 +285,7 @@ display:
       - id: page_air
         lambda: |-
           it.print(0, 0, id(font_cn), "空气质量");
-          it.printf(128, 2, id(font_small), TextAlign::TOP_RIGHT, "2/2");
+          it.printf(128, 2, id(font_small), TextAlign::TOP_RIGHT, "2/3");
           it.line(0, 13, 127, 13);
           // ENS160 每次上电需约 3 分钟预热，预热期间读数为 NaN：整页显示提示
           if (isnan(id(eco2).state)) {
@@ -293,6 +314,35 @@ display:
           else if (r == "Poor") rc = "差";
           else if (r == "Unhealthy") rc = "劣";
           it.printf(128, 51, id(font_cn), TextAlign::TOP_RIGHT, "%s", rc);
+
+      # ---- Page 3 "表情"（原 ui_pages.cpp 表情页 / Ui::Face 引擎）----
+      # 全屏 IrisOLED 位图，无页眉页码（与固件版一致）。
+      # 情绪映射：预热→ sleepy 困倦 | 空气极佳→ excited | 良好→ happy（wink）
+      #   一般→ neutral（扫视+眨眼） | 舒适度超标→ worried | AQI4→ sad
+      #   AQI5→ angry | TVOC≥2000→ dizzy；切换时有 800ms 过渡帧。
+      - id: page_face
+        lambda: |-
+          // static：clear_epoch 需跨周期单调递增，Face::draw 才能在每个
+          // 周期都识别到"缓冲已清空"并整帧重绘（详见 face_canvas.h）。
+          static EsphomeCanvas canvas;
+          canvas.begin(it);
+          canvas.clear();
+          // SensorData 字段顺序与固件版 main.cpp 一致（…, tvoc, eco2, aqi）。
+          // NaN（预热期）→ 0：Face::classify 里 aqi==0 → Sleepy，同固件版。
+          float t = id(temp_disp).state;
+          float h = id(hum_disp).state;
+          float v = id(tvoc).state;
+          float c2 = id(eco2).state;
+          float q = id(aqi).state;
+          Ui::SensorData s{
+              isnan(t) ? 0.0f : t,
+              isnan(h) ? 0.0f : h,
+              isnan(v) ? 0 : (uint16_t) v,
+              isnan(c2) ? 0 : (uint16_t) c2,
+              isnan(q) ? 0 : (uint8_t) q,
+          };
+          Ui::Face::update(s, millis());
+          Ui::Face::draw(canvas, millis());
 
 # 8 秒自动翻页（对应 PAGE_INTERVAL_MS 8000）
 interval:
