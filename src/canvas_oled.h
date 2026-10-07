@@ -1,9 +1,18 @@
 #pragma once
 // ============================================================================
 // OledCanvas: maps Canvas calls onto an Adafruit_SSD1306 display.
+//
+// flush() is diff-based: it keeps a copy of the 1 KB GDDRAM image actually
+// pushed last time. Unchanged content short-circuits with zero I2C traffic;
+// changed content re-pushes the whole buffer (the Adafruit library only
+// exposes whole-frame output). Together with the per-frame pointer cache in
+// Face::draw() this makes the 30 fps mood-page tick cost only a 1 KB memcmp
+// whenever the face is standing still.
 // ============================================================================
 
 #include "ui_canvas.h"
+
+#include <cstdint>
 
 class Adafruit_SSD1306;
 
@@ -20,4 +29,6 @@ public:
 
 private:
     Adafruit_SSD1306 *display_;
+    uint8_t prev_[128 * 8]; // GDDRAM image as last pushed
+    bool prevValid_ = false;
 };

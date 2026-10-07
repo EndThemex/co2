@@ -16,8 +16,11 @@ FILES = {f.name.lower().replace(" ", "_").replace(".h", ""): f.path
          for f in os.scandir(ARR_DIR) if f.name.lower().endswith(".h")}
 
 # Mood page frames (see ui_face.h for the mood -> frame mapping).
-FRAMES = ["normal", "blink", "look_left", "look_right", "happy", "sad",
-          "sleepy", "worried", "disoriented", "surprised"]
+FRAMES = ["normal", "blink", "blink_up", "blink_down",
+          "look_left", "look_right", "look_up", "look_down",
+          "happy", "wink_left", "wink_right", "excited", "bored",
+          "sad", "sleepy", "worried", "angry", "disoriented",
+          "surprised", "scared"]
 
 def load(name):
     with open(FILES[name], "r", encoding="utf-8", errors="ignore") as f:

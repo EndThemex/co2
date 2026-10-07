@@ -2,10 +2,10 @@
 // Page drawing implementations. Depends only on the Canvas abstraction,
 // so the same code renders to OLED (firmware) and ASCII grid (PC simulator).
 //
-// Three pages:
-//   0 "Climate"     : temperature + humidity + comfort status
-//   1 "Air Quality" : eCO2 + TVOC + AQI
-//   2 "Mood"        : animated face reflecting air/comfort (see ui_face.h)
+// Three pages (titles rendered in Chinese via the FontCN whitelist):
+//   0 "温湿度"   : temperature + humidity + comfort status
+//   1 "空气质量" : eCO2 + TVOC + AQI
+//   2 "表情"     : animated face reflecting air/comfort (see ui_face.h)
 //
 // Anti-overlap rule: numbers are RIGHT-ALIGNED into fixed slots sized for the
 // longest possible value (see ui_layout.h), units live in their own column.
@@ -35,18 +35,19 @@ namespace Ui
     }
 
     // ========================================================================
-    // Text dictionaries (business text). Kept local to this TU.
+    // Text dictionaries (business text, UTF-8 Chinese). Kept local to this TU.
+    // Every Chinese glyph used here must be whitelisted in tools/gen_cn_font.py.
     // ========================================================================
     static const char *aqiShort(uint8_t a)
     {
         switch (a)
         {
-        case 1: return "Excellent";
-        case 2: return "Good";
-        case 3: return "Moderate";
-        case 4: return "Poor";
-        case 5: return "Unhealthy";
-        default: return "Unknown";
+        case 1: return "优";
+        case 2: return "良";
+        case 3: return "中";
+        case 4: return "差";
+        case 5: return "很差";
+        default: return "未知";
         }
     }
 
@@ -54,12 +55,12 @@ namespace Ui
     {
         switch (cf)
         {
-        case Comfort::Cold: return "Cold";
-        case Comfort::Hot: return "Hot";
-        case Comfort::Dry: return "Dry";
-        case Comfort::Humid: return "Humid";
-        case Comfort::Comfort: return "Comfort";
-        default: return "OK";
+        case Comfort::Cold: return "偏冷";
+        case Comfort::Hot: return "偏热";
+        case Comfort::Dry: return "干燥";
+        case Comfort::Humid: return "潮湿";
+        case Comfort::Comfort: return "舒适";
+        default: return "正常";
         }
     }
 
@@ -93,10 +94,10 @@ namespace Ui
     static void draw_climate(Canvas &c, const SensorData &d, uint8_t pageIdx,
                              uint32_t /*now_ms*/)
     {
-        draw_header(c, "Climate", pageIdx);
+        draw_header(c, "温湿度", pageIdx);
 
         // Temperature row: number right-aligned in [54..114], unit at 116.
-        c.draw_text(0, Layout::ROW1_Y + Layout::LABEL_DY, 1, "Temp");
+        c.draw_text(0, Layout::ROW1_Y + Layout::LABEL_DY, 1, "温度");
 
         char num[8];
         std::snprintf(num, sizeof(num), "%.1f", d.temperature);
@@ -107,7 +108,7 @@ namespace Ui
                        "C");
 
         // Humidity row: number right-aligned in [78..114], unit at 116.
-        c.draw_text(0, Layout::ROW2_Y + Layout::LABEL_DY, 1, "Humidity");
+        c.draw_text(0, Layout::ROW2_Y + Layout::LABEL_DY, 1, "湿度");
 
         std::snprintf(num, sizeof(num), "%.0f", d.humidity);
         draw_text_right(c, Layout::CLIMATE_NUM_RIGHT, Layout::ROW2_Y, 2, num);
@@ -115,7 +116,7 @@ namespace Ui
         c.draw_text(Layout::CLIMATE_UNIT_X, Layout::ROW2_Y + Layout::UNIT_DY,
                     1, "%");
 
-        // Footer: comfort status (max "Comfort" = 42px).
+        // Footer: comfort status (max "潮湿" = 25px).
         c.draw_text(0, Layout::CLIMATE_STATUS_Y, 1,
                     comfortText(comfort_category(d.temperature, d.humidity)));
     }
@@ -126,7 +127,7 @@ namespace Ui
     static void draw_air(Canvas &c, const SensorData &d, uint8_t pageIdx,
                          uint32_t /*now_ms*/)
     {
-        draw_header(c, "Air Quality", pageIdx);
+        draw_header(c, "空气质量", pageIdx);
 
         char num[8];
 
@@ -168,12 +169,13 @@ namespace Ui
     }
 
     // ========================================================================
-    // Page table
+    // Page table (titles are UTF-8 Chinese; the Mood page itself is
+    // headerless full-screen art, its title is only used by the simulator).
     // ========================================================================
     const Page PAGES[] = {
-        {"Climate", draw_climate},
-        {"Air Quality", draw_air},
-        {"Mood", draw_mood},
+        {"温湿度", draw_climate},
+        {"空气质量", draw_air},
+        {"表情", draw_mood},
     };
 
     const uint8_t PAGE_COUNT = (uint8_t)(sizeof(PAGES) / sizeof(PAGES[0]));

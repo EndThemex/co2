@@ -4,6 +4,8 @@
 
 #include "canvas_console.h"
 
+#include "font_cn.h"
+
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -131,6 +133,7 @@ void ConsoleCanvas::clear()
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x)
             buf_[y][x] = '.';
+    note_clear();
 }
 
 void ConsoleCanvas::set_pixel(int px, int py)
@@ -182,30 +185,45 @@ void ConsoleCanvas::draw_text(int x, int y, int size, const char *s)
 {
     if (!s)
         return;
-    // The 5x7 glyph is laid out as 5 columns x 7 rows. Each "glyph pixel"
-    // is repeated `size` times in X and `size` times in Y when size > 1.
+    // UTF-8 aware, mirroring OledCanvas: Latin-1 bytes (incl. '°' 0xF8) use
+    // the 5x7 font, CJK code points blit the 12x12 FontCN whitelist glyphs.
+    // Glyph pixels are repeated `size` times in X and Y when size > 1.
     int cx = x;
     int cy = y;
-    int char_pitch = 6 * size; // 5 columns + 1 spacing column
 
-    for (const char *p = s; *p; ++p)
+    for (unsigned i = 0; s[i];)
     {
-        const unsigned char *glyph = font5x7_or_default(*p);
-        for (int col = 0; col < 5; ++col)
+        const uint32_t cp = Canvas::utf8_next(s, i);
+        if (cp < 0x100)
         {
-            unsigned char bits = glyph[col];
-            for (int row = 0; row < 7; ++row)
+            const unsigned char *glyph = font5x7_or_default((char)cp);
+            for (int col = 0; col < 5; ++col)
             {
-                if (bits & (1 << row))
+                unsigned char bits = glyph[col];
+                for (int row = 0; row < 7; ++row)
                 {
-                    for (int dy = 0; dy < size; ++dy)
-                        for (int dx = 0; dx < size; ++dx)
-                            put_glyph_pixel(cx + col * size + dx,
-                                            cy + row * size + dy, *p, size);
+                    if (bits & (1 << row))
+                    {
+                        for (int dy = 0; dy < size; ++dy)
+                            for (int dx = 0; dx < size; ++dx)
+                                put_glyph_pixel(cx + col * size + dx,
+                                                cy + row * size + dy, (char)cp,
+                                                size);
+                    }
                 }
             }
         }
-        cx += char_pitch;
+        else if (const FontCN::Glyph *g = FontCN::find(cp))
+        {
+            for (int row = 0; row < FontCN::H; ++row)
+                for (int col = 0; col < FontCN::W; ++col)
+                    if (g->bits[row * 2 + col / 8] & (0x80 >> (col % 8)))
+                        for (int dy = 0; dy < size; ++dy)
+                            for (int dx = 0; dx < size; ++dx)
+                                set_pixel(cx + col * size + dx,
+                                          cy + row * size + dy);
+        }
+        cx += Canvas::char_advance(cp, size);
         if (cx >= W)
             break;
     }
