@@ -48,8 +48,8 @@ static const OffsetSegment TEMP_OFFSET_TABLE[] = {
 
 // 湿度偏移表：按 AHT30 原始湿度分段 (%RH)，温度虚高会使 RH 系统性偏低
 static const OffsetSegment HUM_OFFSET_TABLE[] = {
-    {40.0f, 18.0f},  // 原始湿度 ≤40%
-    {70.0f, 12.0f},  // 40~70%
+    {40.0f, 16.0f},  // 原始湿度 ≤40%
+    {70.0f, 10.0f},  // 40~70%
     {INFINITY, 8.0f} // >70%
 };
 
