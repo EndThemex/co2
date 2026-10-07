@@ -59,4 +59,7 @@ namespace Layout
     // screen edge starts at >= 74 -> at least 10px of guaranteed gap.
     constexpr int AQI_DIGIT_RIGHT = 64;
     constexpr int AQI_STATUS_RIGHT = SCREEN_WIDTH;
+
+    // ---- Page 3 "Mood": full-screen expression bitmap (ui_face_bitmaps.h) ----
+    // Intentionally headerless: the frames are standalone full-screen art.
 }

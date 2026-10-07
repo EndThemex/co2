@@ -12,6 +12,11 @@ void OledCanvas::clear()
     display_->clearDisplay();
 }
 
+void OledCanvas::draw_pixel(int x, int y)
+{
+    display_->drawPixel(x, y, SSD1306_WHITE);
+}
+
 void OledCanvas::draw_text(int x, int y, int size, const char *s)
 {
     display_->setTextSize(size);

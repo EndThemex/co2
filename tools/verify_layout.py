@@ -50,7 +50,7 @@ def right_x(text, right_edge, size):
 
 # ---- Pages: element lists (text, x, y, size) mirroring ui_pages.cpp ----
 def header(title, idx):
-    ind = "%d/2" % (idx + 1)
+    ind = "%d/3" % (idx + 1)
     return [(title, 0, 0, 1), (ind, right_x(ind, 128, 1), 0, 1)]  # line checked separately
 
 def page_climate(d):
@@ -80,12 +80,12 @@ def page_air(d):
     return els
 
 def parse_sim_output(out):
-    """Extract the two 64-row pages from ui_sim --all output."""
+    """Extract the three 64-row pages from ui_sim --all output."""
     rows = [l[1:-1] for l in out.splitlines() if l.startswith('|') and l.endswith('|')]
-    assert len(rows) == 2 * H, "expected %d rows, got %d" % (2 * H, len(rows))
-    return rows[:H], rows[H:]
+    assert len(rows) == 3 * H, "expected %d rows, got %d" % (3 * H, len(rows))
+    return rows[:H], rows[H:2*H], rows[2*H:]
 
-def check(page_name, expected_els, rendered_rows, hline_y):
+def check(page_name, expected_els, rendered_rows, hline_y, strict=True):
     ok = True
     # 1) every expected element's lit pixels must exist in the render
     want = set()
@@ -105,7 +105,7 @@ def check(page_name, expected_els, rendered_rows, hline_y):
         print("  MISSING ink (element drawn differently than expected):",
               sorted(missing)[:10])
     extra = got - want
-    if extra:
+    if extra and strict:
         ok = False
         print("  UNEXPECTED ink:", sorted(extra)[:10])
     # 3) pairwise element-box disjointness (the anti-overlap guarantee)
@@ -162,12 +162,16 @@ for name, d in cases:
 out = subprocess.run([os.path.join(r"d:\workspace\zheteng\ESP_Projects\co2\tools",
                                    "ui_sim.exe"), "--all"],
                      capture_output=True, text=True).stdout
-sim1, sim2 = parse_sim_output(out)
+sim1, sim2, sim3 = parse_sim_output(out)
 dd = cases[0][1]
 c = page_climate(dd); a = page_air(dd)
 ok1 = check("Climate(sim-real)", c, sim1, 8)
 ok2 = check("Air(sim-real)", a, sim2, 8)
-all_ok &= ok1 and ok2
+# Mood page: full-screen bitmap face, no text elements -> smoke-check only.
+ok3 = any('#' in r for r in sim3)
+if not ok3:
+    print("  Mood page rendered no ink")
+all_ok &= ok1 and ok2 and ok3
 
 print("RESULT:", "ALL OK" if all_ok else "FAILURES PRESENT")
 sys.exit(0 if all_ok else 1)

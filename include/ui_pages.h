@@ -19,10 +19,26 @@ namespace Ui
         uint8_t aqi;
     };
 
+    // Comfort category shared by the Climate footer text and the Face mood
+    // logic (single source of truth for the thresholds).
+    enum class Comfort : uint8_t
+    {
+        Cold,
+        Hot,
+        Dry,
+        Humid,
+        Comfort,
+        Ok
+    };
+    Comfort comfort_category(float t, float h);
+
     struct Page
     {
         const char *title;
-        void (*draw)(Canvas &, const SensorData &, uint8_t pageIdx);
+        // now_ms lets time-driven pages (the animated Mood face) render
+        // deterministic frames; data pages ignore it.
+        void (*draw)(Canvas &, const SensorData &, uint8_t pageIdx,
+                     uint32_t now_ms);
     };
 
     extern const Page PAGES[];

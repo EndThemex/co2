@@ -140,6 +140,11 @@ void ConsoleCanvas::set_pixel(int px, int py)
     buf_[py][px] = '#';
 }
 
+void ConsoleCanvas::draw_pixel(int x, int y)
+{
+    set_pixel(x, y);
+}
+
 void ConsoleCanvas::put_glyph_pixel(int px, int py, char /*ch*/, int /*size*/)
 {
     // Always light exactly one OLED pixel; caller already handles `size`

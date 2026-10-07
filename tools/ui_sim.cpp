@@ -4,11 +4,14 @@
 //   ui_sim                -> interactive, press Enter to advance
 //   ui_sim --all          -> dump every page in one shot
 //   ui_sim <n>            -> render only page n (1-based), repeat
-//   ui_sim <n> <count>    -> render page n, <count> times (1-based)
+//   ui_sim <n> <count>    -> render page n, <count> times (1-based);
+//                            the Mood page advances 150 ms per render so
+//                            repeated dumps preview the animation frames.
 // ============================================================================
 
 #include "ui_layout.h"
 #include "ui_pages.h"
+#include "ui_face.h"
 #include "canvas_console.h"
 
 #include <cstdio>
@@ -17,6 +20,12 @@
 
 static const Ui::SensorData PREVIEW_DATA{/*temperature*/ 23.4f, /*humidity*/ 55.0f,
                                          /*tvoc*/ 1187, /*eco2*/ 1742, /*aqi*/ 4};
+
+// Timestamp used for the deterministic face animation. Chosen so the Mood
+// page renders a settled Sad face: hysteresis confirmed (surprise ended) and
+// no blink window active (8200 % 4000 = 200, 8200 % 7300 = 900).
+static const uint32_t BASE_NOW = 8200;
+static const uint32_t FRAME_STEP_MS = 150;
 
 static void print_usage()
 {
@@ -29,13 +38,13 @@ static void print_usage()
                 (unsigned)Ui::PAGE_COUNT);
 }
 
-static void render_one(ConsoleCanvas &c, uint8_t pageIdx)
+static void render_one(ConsoleCanvas &c, uint8_t pageIdx, uint32_t now_ms)
 {
     std::printf("\n=== Page %u/%u : %s ===\n",
                 (unsigned)(pageIdx + 1), (unsigned)Ui::PAGE_COUNT,
                 Ui::PAGES[pageIdx].title);
     c.clear();
-    Ui::PAGES[pageIdx].draw(c, PREVIEW_DATA, pageIdx);
+    Ui::PAGES[pageIdx].draw(c, PREVIEW_DATA, pageIdx, now_ms);
     c.flush();
 }
 
@@ -55,12 +64,18 @@ int main(int argc, char **argv)
 {
     ConsoleCanvas c;
 
+    // Advance the face hysteresis to a settled state (Sad for PREVIEW_DATA):
+    // candidate appears at 1000 ms, confirmed at 7000 ms. Renders then show
+    // the real mood instead of the boot-time Sleepy face.
+    Ui::Face::update(PREVIEW_DATA, 1000);
+    Ui::Face::update(PREVIEW_DATA, 7000);
+
     // No args: legacy interactive mode.
     if (argc == 1)
     {
         for (uint8_t i = 0; i < Ui::PAGE_COUNT; ++i)
         {
-            render_one(c, i);
+            render_one(c, i, BASE_NOW);
             if (i + 1 < Ui::PAGE_COUNT)
             {
                 std::printf("\n[Enter] next  ");
@@ -75,7 +90,7 @@ int main(int argc, char **argv)
     if (std::strcmp(argv[1], "--all") == 0)
     {
         for (uint8_t i = 0; i < Ui::PAGE_COUNT; ++i)
-            render_one(c, i);
+            render_one(c, i, BASE_NOW);
         return 0;
     }
 
@@ -116,7 +131,7 @@ int main(int argc, char **argv)
     {
         if (count > 1)
             std::printf("\n--- render #%d ---\n", i + 1);
-        render_one(c, pageIdx);
+        render_one(c, pageIdx, BASE_NOW + (uint32_t)i * FRAME_STEP_MS);
     }
 
     return 0;

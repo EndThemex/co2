@@ -15,6 +15,7 @@
 
 #include "ui_layout.h"
 #include "ui_pages.h"
+#include "ui_face.h"
 #include "canvas_oled.h"
 
 // ====== 引脚定义 ======
@@ -65,7 +66,10 @@ static float lookupOffset(const OffsetSegment (&table)[N], float value)
 }
 
 // ====== 界面分页参数 ======
-#define PAGE_INTERVAL_MS 8000 // 每页停留时间（ms）
+#define PAGE_INTERVAL_MS 8000  // 每页停留时间（ms）
+#define SENSOR_PERIOD_MS 1000  // 传感器读取/情绪评估周期（ms）
+#define MOOD_FRAME_MS 66       // 表情页动画帧间隔（~15fps）
+#define DATA_FRAME_MS 500      // 数据页重绘间隔
 
 // ============================================================================
 // 对象声明
@@ -87,6 +91,8 @@ uint8_t aqi = 0;
 // ============================================================================
 static uint8_t currentPage = 0;
 static uint32_t lastPageSwitchMs = 0;
+static uint32_t lastSensorMs = 0;
+static uint32_t lastFrameMs = 0;
 
 // ============================================================================
 // AHT30 直读
@@ -128,14 +134,14 @@ bool readAHT30(float *temperature, float *humidity)
 // ============================================================================
 // 显示刷新
 // ============================================================================
-void updateDisplay()
+void updateDisplay(uint32_t now)
 {
     if (currentPage >= Ui::PAGE_COUNT)
         currentPage = 0;
 
     Ui::SensorData s{temperatureDisp, humidityDisp, tvoc, eco2, aqi};
     oled.clear();
-    Ui::PAGES[currentPage].draw(oled, s, currentPage);
+    Ui::PAGES[currentPage].draw(oled, s, currentPage, now);
     oled.flush();
 }
 
@@ -149,7 +155,9 @@ void setup()
     Serial.println("\n=== Air Quality Monitor Starting ===");
 
     Wire.begin(I2C_SDA, I2C_SCL);
-    Wire.setClock(100000);
+    // 400kHz: SSD1306 全屏刷新（1KB 缓冲）在 100kHz 下约 100ms，会拖慢
+    // 表情页动画帧率；AHT30/ENS160 均支持 400kHz。
+    Wire.setClock(400000);
 
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR))
     {
@@ -182,38 +190,57 @@ void setup()
 }
 
 // ============================================================================
-// 主循环
+// 主循环（非阻塞：传感器 1Hz、表情动画 ~15fps、分页 8s 轮播）
 // ============================================================================
 void loop()
 {
-    if (readAHT30(&temperature, &humidity))
-    {
-        // 原始值喂 ENS160 补偿（微环境真实温湿度）
-        ens160.setTempCompensationCelsius(temperature);
-        ens160.setRHCompensationFloat(humidity);
+    uint32_t now = millis();
 
-        // 校准值仅供显示：按原始值所在区间取对应偏移
-        temperatureDisp = temperature + lookupOffset(TEMP_OFFSET_TABLE, temperature);
-        humidityDisp = constrain(humidity + lookupOffset(HUM_OFFSET_TABLE, humidity), 0.0f, 100.0f);
+    // ---- 传感器采样 + 情绪评估（1Hz）----
+    if (now - lastSensorMs >= SENSOR_PERIOD_MS)
+    {
+        lastSensorMs = now;
+
+        if (readAHT30(&temperature, &humidity))
+        {
+            // 原始值喂 ENS160 补偿（微环境真实温湿度）
+            ens160.setTempCompensationCelsius(temperature);
+            ens160.setRHCompensationFloat(humidity);
+
+            // 校准值仅供显示：按原始值所在区间取对应偏移
+            temperatureDisp = temperature + lookupOffset(TEMP_OFFSET_TABLE, temperature);
+            humidityDisp = constrain(humidity + lookupOffset(HUM_OFFSET_TABLE, humidity), 0.0f, 100.0f);
+        }
+
+        if (ens160.checkDataStatus())
+        {
+            aqi = ens160.getAQI();
+            tvoc = ens160.getTVOC();
+            eco2 = ens160.getECO2();
+        }
+
+        Serial.printf("Page:%u | T:%.2f (disp %.2f) C | H:%.2f (disp %.2f) %% | eCO2:%u ppm | TVOC:%u ppb | AQI:%u\n",
+                      currentPage, temperature, temperatureDisp, humidity, humidityDisp, eco2, tvoc, aqi);
+
+        Ui::SensorData s{temperatureDisp, humidityDisp, tvoc, eco2, aqi};
+        Ui::Face::update(s, now);
     }
 
-    if (ens160.checkDataStatus())
-    {
-        aqi = ens160.getAQI();
-        tvoc = ens160.getTVOC();
-        eco2 = ens160.getECO2();
-    }
-
-    Serial.printf("Page:%u | T:%.2f (disp %.2f) C | H:%.2f (disp %.2f) %% | eCO2:%u ppm | TVOC:%u ppb | AQI:%u\n",
-                  currentPage, temperature, temperatureDisp, humidity, humidityDisp, eco2, tvoc, aqi);
-
-    updateDisplay();
-
-    if (millis() - lastPageSwitchMs >= PAGE_INTERVAL_MS)
+    // ---- 分页轮播 ----
+    if (now - lastPageSwitchMs >= PAGE_INTERVAL_MS)
     {
         currentPage = (currentPage + 1) % Ui::PAGE_COUNT;
-        lastPageSwitchMs = millis();
+        lastPageSwitchMs = now;
     }
 
-    delay(1000);
+    // ---- 按页面类型重绘：表情页按动画帧率，数据页低频刷新 ----
+    uint32_t frameMs = (currentPage == Ui::PAGE_COUNT - 1) ? MOOD_FRAME_MS
+                                                           : DATA_FRAME_MS;
+    if (now - lastFrameMs >= frameMs)
+    {
+        lastFrameMs = now;
+        updateDisplay(now);
+    }
+
+    delay(5);
 }

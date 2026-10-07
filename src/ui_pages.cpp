@@ -2,9 +2,10 @@
 // Page drawing implementations. Depends only on the Canvas abstraction,
 // so the same code renders to OLED (firmware) and ASCII grid (PC simulator).
 //
-// Two pages:
+// Three pages:
 //   0 "Climate"     : temperature + humidity + comfort status
 //   1 "Air Quality" : eCO2 + TVOC + AQI
+//   2 "Mood"        : animated face reflecting air/comfort (see ui_face.h)
 //
 // Anti-overlap rule: numbers are RIGHT-ALIGNED into fixed slots sized for the
 // longest possible value (see ui_layout.h), units live in their own column.
@@ -12,11 +13,26 @@
 
 #include "ui_pages.h"
 
+#include "ui_face.h"
+
 #include <cstdio>
 
 namespace Ui
 {
     using Layout::SCREEN_WIDTH;
+
+    // ========================================================================
+    // Comfort classification (single source of truth for the thresholds).
+    // ========================================================================
+    Comfort comfort_category(float t, float h)
+    {
+        if (t < 18.0f) return Comfort::Cold;
+        if (t > 28.0f) return Comfort::Hot;
+        if (h < 30.0f) return Comfort::Dry;
+        if (h > 70.0f) return Comfort::Humid;
+        if (t >= 20.0f && t <= 26.0f && h >= 40.0f && h <= 60.0f) return Comfort::Comfort;
+        return Comfort::Ok;
+    }
 
     // ========================================================================
     // Text dictionaries (business text). Kept local to this TU.
@@ -34,14 +50,17 @@ namespace Ui
         }
     }
 
-    static const char *comfortText(float t, float h)
+    static const char *comfortText(Comfort cf)
     {
-        if (t < 18.0f) return "Cold";
-        if (t > 28.0f) return "Hot";
-        if (h < 30.0f) return "Dry";
-        if (h > 70.0f) return "Humid";
-        if (t >= 20.0f && t <= 26.0f && h >= 40.0f && h <= 60.0f) return "Comfort";
-        return "OK";
+        switch (cf)
+        {
+        case Comfort::Cold: return "Cold";
+        case Comfort::Hot: return "Hot";
+        case Comfort::Dry: return "Dry";
+        case Comfort::Humid: return "Humid";
+        case Comfort::Comfort: return "Comfort";
+        default: return "OK";
+        }
     }
 
     // ========================================================================
@@ -71,7 +90,8 @@ namespace Ui
     // ========================================================================
     // Page 0: Climate — temperature & humidity
     // ========================================================================
-    static void draw_climate(Canvas &c, const SensorData &d, uint8_t pageIdx)
+    static void draw_climate(Canvas &c, const SensorData &d, uint8_t pageIdx,
+                             uint32_t /*now_ms*/)
     {
         draw_header(c, "Climate", pageIdx);
 
@@ -97,13 +117,14 @@ namespace Ui
 
         // Footer: comfort status (max "Comfort" = 42px).
         c.draw_text(0, Layout::CLIMATE_STATUS_Y, 1,
-                    comfortText(d.temperature, d.humidity));
+                    comfortText(comfort_category(d.temperature, d.humidity)));
     }
 
     // ========================================================================
     // Page 1: Air Quality — eCO2, TVOC, AQI
     // ========================================================================
-    static void draw_air(Canvas &c, const SensorData &d, uint8_t pageIdx)
+    static void draw_air(Canvas &c, const SensorData &d, uint8_t pageIdx,
+                         uint32_t /*now_ms*/)
     {
         draw_header(c, "Air Quality", pageIdx);
 
@@ -137,11 +158,22 @@ namespace Ui
     }
 
     // ========================================================================
+    // Page 2: Mood — full-screen IrisOLED-style expression (no header/caption:
+    // the frames are standalone full-screen art, ink spans nearly all rows).
+    // ========================================================================
+    static void draw_mood(Canvas &c, const SensorData & /*d*/, uint8_t /*pageIdx*/,
+                          uint32_t now_ms)
+    {
+        Face::draw(c, now_ms);
+    }
+
+    // ========================================================================
     // Page table
     // ========================================================================
     const Page PAGES[] = {
         {"Climate", draw_climate},
         {"Air Quality", draw_air},
+        {"Mood", draw_mood},
     };
 
     const uint8_t PAGE_COUNT = (uint8_t)(sizeof(PAGES) / sizeof(PAGES[0]));
