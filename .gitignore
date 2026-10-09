@@ -16,3 +16,5 @@ tools/obj/
 # 系统杂项
 Thumbs.db
 .DS_Store
+compile_commands.json
+.vscode/extensions.json
