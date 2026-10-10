@@ -22,7 +22,7 @@
 
 namespace Layout
 {
-    constexpr int SCREEN_WIDTH  = 128;
+    constexpr int SCREEN_WIDTH = 128;
     constexpr int SCREEN_HEIGHT = 64;
 
     // ---- Shared header -----------------------------------------------------
@@ -49,9 +49,12 @@ namespace Layout
     // Numbers are right-aligned into the slot [54 .. 114]:
     // worst case "-45.5" (60px) starts at 54, clear of the 25px label column.
     constexpr int CLIMATE_NUM_RIGHT = 114;
-    // Footer comfort status (size 1 CJK, left-aligned at x=0, max 2 glyphs
-    // = 25px, 12px tall -> 50..61, below row 2 which ends at 46).
+    // Footer comfort status: CENTERED (2 glyphs = 26px -> x=51..76) and
+    // flanked by divider lines, so the row reads as a deliberate status bar
+    // instead of a lone corner label. Text 12px tall -> 50..61, below row 2
+    // which ends at 46; divider sits at the text's vertical center (56).
     constexpr int CLIMATE_STATUS_Y = 50;
+    constexpr int CLIMATE_STATUS_LINE_Y = 56;
 
     // ---- Page 2 "空气质量": eCO2 / TVOC / AQI --------------------------------
     // Unit column: "ppm" / "ppb" (18px) start here, end exactly at 128.
@@ -59,9 +62,11 @@ namespace Layout
     // Numbers are right-aligned into the slot [48 .. 108]:
     // worst case "65535" (60px) starts at 48, clear of the 24px label column.
     constexpr int AIR_NUM_RIGHT = 108;
-    // AQI row: digit ends at 64; status word (<=25px) right-aligned to the
-    // screen edge starts at >= 103 -> at least 39px of guaranteed gap.
-    constexpr int AQI_DIGIT_RIGHT = 64;
+    // AQI row: digit hugs its label ("AQI" = 18px -> digit at x=22..33),
+    // so the value never floats in the middle of the screen; status word
+    // right-aligned to the screen edge. Worst case "很差/未知" (26px) starts
+    // at 102 -> >= 69px guaranteed gap after the digit, no overlap.
+    constexpr int AQI_DIGIT_X = 22;
     constexpr int AQI_STATUS_RIGHT = SCREEN_WIDTH;
 
     // ---- Page 3 "表情": full-screen expression bitmap (ui_face_bitmaps.h) ----

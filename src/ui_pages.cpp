@@ -26,11 +26,16 @@ namespace Ui
     // ========================================================================
     Comfort comfort_category(float t, float h)
     {
-        if (t < 18.0f) return Comfort::Cold;
-        if (t > 28.0f) return Comfort::Hot;
-        if (h < 30.0f) return Comfort::Dry;
-        if (h > 70.0f) return Comfort::Humid;
-        if (t >= 20.0f && t <= 26.0f && h >= 40.0f && h <= 60.0f) return Comfort::Comfort;
+        if (t < 18.0f)
+            return Comfort::Cold;
+        if (t > 28.0f)
+            return Comfort::Hot;
+        if (h < 30.0f)
+            return Comfort::Dry;
+        if (h > 70.0f)
+            return Comfort::Humid;
+        if (t >= 20.0f && t <= 26.0f && h >= 40.0f && h <= 60.0f)
+            return Comfort::Comfort;
         return Comfort::Ok;
     }
 
@@ -42,12 +47,18 @@ namespace Ui
     {
         switch (a)
         {
-        case 1: return "优";
-        case 2: return "良";
-        case 3: return "中";
-        case 4: return "差";
-        case 5: return "很差";
-        default: return "未知";
+        case 1:
+            return "优";
+        case 2:
+            return "良";
+        case 3:
+            return "中";
+        case 4:
+            return "差";
+        case 5:
+            return "很差";
+        default:
+            return "未知";
         }
     }
 
@@ -55,12 +66,18 @@ namespace Ui
     {
         switch (cf)
         {
-        case Comfort::Cold: return "偏冷";
-        case Comfort::Hot: return "偏热";
-        case Comfort::Dry: return "干燥";
-        case Comfort::Humid: return "潮湿";
-        case Comfort::Comfort: return "舒适";
-        default: return "正常";
+        case Comfort::Cold:
+            return "偏冷";
+        case Comfort::Hot:
+            return "偏热";
+        case Comfort::Dry:
+            return "干燥";
+        case Comfort::Humid:
+            return "潮湿";
+        case Comfort::Comfort:
+            return "舒适";
+        default:
+            return "正常";
         }
     }
 
@@ -116,9 +133,16 @@ namespace Ui
         c.draw_text(Layout::CLIMATE_UNIT_X, Layout::ROW2_Y + Layout::UNIT_DY,
                     1, "%");
 
-        // Footer: comfort status (max "潮湿" = 25px).
-        c.draw_text(0, Layout::CLIMATE_STATUS_Y, 1,
-                    comfortText(comfort_category(d.temperature, d.humidity)));
+        // Footer: comfort status centered as a status bar, divider lines
+        // filling the space to both screen edges.
+        const char *status = comfortText(comfort_category(d.temperature, d.humidity));
+        const int sw = Canvas::text_width(status, 1);
+        const int sx = (SCREEN_WIDTH - sw) / 2;
+        c.draw_line(0, Layout::CLIMATE_STATUS_LINE_Y, sx - 5,
+                    Layout::CLIMATE_STATUS_LINE_Y);
+        c.draw_text(sx, Layout::CLIMATE_STATUS_Y, 1, status);
+        c.draw_line(sx + sw + 4, Layout::CLIMATE_STATUS_LINE_Y,
+                    SCREEN_WIDTH - 1, Layout::CLIMATE_STATUS_LINE_Y);
     }
 
     // ========================================================================
@@ -145,13 +169,14 @@ namespace Ui
         c.draw_text(Layout::AIR_UNIT_X, Layout::ROW2_Y + Layout::UNIT_DY,
                     1, "ppb");
 
-        // AQI row: single digit ends at 64, status word right-aligned to 128.
+        // AQI row: digit sits right after the "AQI" label; status word
+        // right-aligned to the screen edge.
         c.draw_text(0, Layout::ROW3_Y + Layout::LABEL_DY, 1, "AQI");
 
         char digit[2] = {'-', '\0'};
         if (d.aqi >= 1 && d.aqi <= 5)
             digit[0] = (char)('0' + d.aqi);
-        draw_text_right(c, Layout::AQI_DIGIT_RIGHT, Layout::ROW3_Y, 2, digit);
+        c.draw_text(Layout::AQI_DIGIT_X, Layout::ROW3_Y, 2, digit);
 
         draw_text_right(c, Layout::AQI_STATUS_RIGHT,
                         Layout::ROW3_Y + Layout::LABEL_DY, 1,
