@@ -56,6 +56,8 @@
   }
   .btn:hover{border-color:#3b506a;background:#172230}
   .btn.ghost{background:transparent}
+  .btn.primary{border-color:rgba(90,215,255,.45);background:rgba(90,215,255,.1);color:#9fe9ff}
+  .btn.primary:hover{border-color:rgba(90,215,255,.72);background:rgba(90,215,255,.16)}
   .app{
     display:grid;grid-template-columns:258px minmax(0,1fr) 304px;
     gap:14px;padding:14px 16px 22px;align-items:start;
@@ -161,6 +163,12 @@
   #diagList .tag.warn{color:var(--warn);background:rgba(255,180,84,.12)}
   #diagList .tag.info{color:var(--accent);background:rgba(90,215,255,.12)}
   #diagList .ok-line{color:var(--dim);cursor:default;background:none}
+  .export-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .export-actions .btn{flex:1;white-space:nowrap}
+  .export .hint{margin:8px 0 0;color:var(--dim-2);font-size:10px;line-height:1.6}
+  .export .hint code{font-family:var(--mono);color:#9fe9ff}
+  .export-preview-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;color:var(--dim);font-size:11px}
+  .export-preview-head select{padding:3px 6px;font-size:11px}
   .right .export pre{
     margin:8px 0 0;padding:9px;border-radius:8px;background:#080d14;border:1px solid var(--line);
     color:var(--dim);font:10px/1.5 var(--mono);max-height:210px;overflow:auto;white-space:pre;
@@ -207,11 +215,11 @@
     <span class="sub">SSD1306 单色像素预览 · 固件布局基准 ui_layout.h</span>
   </div>
   <div class="top-actions">
-    <label class="mini" title="数值字体的字符步进宽度：ui_layout.h 按 12px 设计，ui_canvas.h 当前 VALUE_SCALE_X=3">
+    <label class="mini" title="数值字体的字符步进宽度：ui_layout.h 按 12px 设计，ui_canvas.h 当前 VALUE_SCALE_X=2">
       数值度量
       <select id="valueMetric">
-        <option value="2">2×3 · 12px/字符（布局基准）</option>
-        <option value="3">3×3 · 18px/字符（当前 ui_canvas.h）</option>
+        <option value="2">2×3 · 12px/字符（固件基准）</option>
+        <option value="3">3×3 · 18px/字符（实验，超宽警告）</option>
       </select>
     </label>
     <button id="btnPng" class="btn ghost">导出 PNG</button>
@@ -290,7 +298,18 @@
 
     <div class="panel-title">导出</div>
     <div class="export">
-      <button class="btn" id="btnCopy">复制布局 JSON</button>
+      <div class="export-actions">
+        <button class="btn" id="btnCopy">复制布局 JSON</button>
+        <button class="btn primary" id="btnHeader">导出 ui_layout.h</button>
+      </div>
+      <p class="hint">首次导出请选择 <code>co2/include/ui_layout.h</code>；Chrome/Edge 会记住该位置，之后确认覆盖即可。不支持直接写入的浏览器会改为下载。</p>
+      <div class="export-preview-head">
+        <span>预览</span>
+        <select id="previewMode">
+          <option value="json">布局 JSON</option>
+          <option value="header">ui_layout.h</option>
+        </select>
+      </div>
       <pre id="exportPreview"></pre>
     </div>
   </aside>
@@ -337,6 +356,7 @@ const state = {
   page: "climate",
   metric: 2,
   zoom: 6,
+  preview: "json",
   toggles: { grid:false, guides:true, boxes:false, colors:true },
   data: { t:23.4, h:55, eco2:1742, tvoc:1187, aqi:4 },
   elements: [],
@@ -868,8 +888,8 @@ function renderAll(keepInspector){
   updateExport();
 }
 
-function updateExport(){
-  const payload = {
+function exportPayload(){
+  return {
     screen: { w: W, h: H },
     page: state.page,
     valueAdvance: 6 * state.metric,
@@ -883,8 +903,233 @@ function updateExport(){
       };
     }),
   };
-  $("exportPreview").textContent = JSON.stringify(payload, null, 2);
-  return payload;
+}
+
+// ---- ui_layout.h export ----------------------------------------------------
+// ui_layout.h collapses both data pages into one shared set of constants, so
+// each constant is read from its primary element. Elements that share a
+// constant (e.g. VALUE_Y) are checked, and mismatches are noted in the header.
+function elementOf(page, id){
+  const list = cache[page] || defaults(page);
+  return list.find(e => e.id === id) || defaults(page).find(e => e.id === id);
+}
+
+function buildHeader(){
+  const cLabelT = elementOf("climate", "c_label_t");
+  const cUnitT  = elementOf("climate", "c_unit_t");
+  const cValueT = elementOf("climate", "c_value_t");
+  const cLabelH = elementOf("climate", "c_label_h");
+  const cUnitH  = elementOf("climate", "c_unit_h");
+  const cValueH = elementOf("climate", "c_value_h");
+  const cStatus = elementOf("climate", "c_status");
+  const aLabelC = elementOf("air", "a_label_c");
+  const aUnitC  = elementOf("air", "a_unit_c");
+  const aValueC = elementOf("air", "a_value_c");
+  const aLabelV = elementOf("air", "a_label_v");
+  const aUnitV  = elementOf("air", "a_unit_v");
+  const aValueV = elementOf("air", "a_value_v");
+  const aAqiL   = elementOf("air", "a_aqi_l");
+  const aAqiD   = elementOf("air", "a_aqi_d");
+  const aQuality= elementOf("air", "a_quality");
+  const aAqiW   = elementOf("air", "a_aqi_w");
+
+  const left = (el) => geom(el).x;
+  const right = (el) => { const b = geom(el); return b.x + b.w; };
+  const center = (el) => { const b = geom(el); return b.x + Math.floor(b.w / 2); };
+  const range = (el) => { const b = geom(el); return `${b.x}..${b.x + b.w - 1}`; };
+
+  const tile1 = left(aLabelC);
+  const tile2 = left(aLabelV);
+  const tileW = tile2 - tile1;
+  const cjkLabelY = cLabelT.y;
+  const asciiLabelY = aLabelC.y;
+  const unitY = aUnitC.y;
+  const valueY = cValueT.y;
+  const climateGap = left(cUnitT) - right(cLabelT);
+  const airGap = left(aUnitC) - right(aLabelC);
+  const labelUnitGap = Math.min(climateGap, airGap);
+
+  // Worst-case data widths, using the firmware value metrics (12px per char).
+  const wTemp = measure("-45.5", "value", 2);
+  const wHum = measure("100", "value", 2);
+  const wNum = measure("65535", "value", 2);
+  const wDigit = measure("5", "ascii2", 2);
+  const wStatus = measure("很差", "cjk1", 2);
+  const valueH = textHeight("-45.5", "value", 2);
+  const cjkH = textHeight("舒适", "cjk1", 2);
+  const ascii2H = textHeight("5", "ascii2", 2);
+
+  const tempValueX = left(cValueT);
+  const humValueX = left(cValueH);
+  const aqiDigitX = left(aAqiD);
+  const aqiStatusRight = right(aAqiW);
+  const climLabelBottom = cLabelT.y + cjkH - 1;
+  const asciiLabelBottom = aLabelC.y + 8 - 1;
+  const valueBottom = valueY + valueH - 1;
+  const aqiDigitBottom = aAqiD.y + ascii2H - 1;
+
+  // Shared constants: every listed element must agree on the value.
+  const checks = [
+    ["TILE1_X", [aLabelC, aValueC, aAqiL], left],
+    ["TILE2_X", [aLabelV, aValueV], left],
+    ["CJK_LABEL_Y", [cLabelT, cLabelH], (el) => el.y],
+    ["ASCII_LABEL_Y", [aLabelC, aLabelV], (el) => el.y],
+    ["UNIT_Y", [aUnitC, aUnitV], (el) => el.y],
+    ["VALUE_Y", [cValueT, cValueH, aValueC, aValueV], (el) => el.y],
+    ["AQI_STATUS_Y", [aQuality, aAqiW], (el) => el.y],
+  ];
+  const notes = [];
+  for (const [name, els, get] of checks) {
+    const vals = els.map(get);
+    if (new Set(vals).size > 1)
+      notes.push(`//   ${name}: ` + els.map((el, i) => `${el.id}=${vals[i]}`).join(", "));
+  }
+
+  const L = [];
+  L.push("#pragma once");
+  L.push("// ============================================================================");
+  L.push("// UI layout constants. Hardware-independent (no Arduino dependency).");
+  L.push("// Shared by the firmware (OLED canvas), the PC simulator (console canvas)");
+  L.push("// and the layout lab.");
+  L.push("//");
+  L.push("// GENERATED by tools/layout_lab.html -- change the layout visually, then use");
+  L.push('// "导出 ui_layout.h" to rewrite this file. Avoid hand-editing the numbers.');
+  L.push("//");
+  if (notes.length) {
+    L.push("// NOTE: these shared constants had inconsistent sources in the layout lab;");
+    L.push("// the primary element's value was exported. Re-align them if unintended:");
+    L.push(...notes);
+    L.push("//");
+  }
+  L.push("// Coordinate convention:");
+  L.push("//   * X constants are the LEFT edge of the text (start column), except");
+  L.push("//     *_CENTER_X (horizontal center) and *_RIGHT (right edge).");
+  L.push("//   * Y constants are the TOP row of the glyph cell; glyph height depends");
+  L.push("//     on the font size:");
+  L.push("//       size 1 ASCII -> 6 x 8 px per char  (8 rows tall)");
+  L.push("//       size 2 ASCII -> 12 x 16 px per char (16 rows tall)");
+  L.push("//       value text   -> 12 x 24 px per char (2x horizontal, 3x vertical)");
+  L.push("//       size 1 CJK   -> 12 x 12 px glyph, 13px advance (12 rows tall)");
+  L.push("//   * Screen extent: x = 0..127, y = 0..63.");
+  L.push("//");
+  L.push("// Design rule: no header at all. Each data page is split into two 64px columns.");
+  L.push("// The label and its unit share one line above the number, and the number owns");
+  L.push("// the full column width. Values are LEFT-aligned in their column, so a");
+  L.push(`// worst-case 5-digit value (${wNum}px @ 12px/char) still fits inside ${tileW}px.`);
+  L.push("//");
+  L.push("// Vertical budget (64px):");
+  L.push(`//   ${cjkLabelY}..${climLabelBottom}   climate CJK label; ${asciiLabelY}..${asciiLabelBottom} ASCII label; ${unitY}..${unitY + 7} climate units`);
+  L.push(`//   ${valueY}..${valueBottom}  value, ${valueH}px tall`);
+  L.push(`//   ${aAqiD.y}..${aqiDigitBottom}  status row (AQI digit ${aAqiD.y}..${aqiDigitBottom}, status words ${aAqiW.y}..${aAqiW.y + cjkH - 1})`);
+  L.push("//");
+  L.push("// Max data lengths used to size the columns:");
+  L.push(`//   temperature "%.1f"  -> "-45.5"     5 chars = ${wTemp}px @ 12px/char (column ${tile1}..${tile1 + tileW - 1})`);
+  L.push(`//   humidity    "%.0f"  -> "100"       3 chars = ${wHum}px @ 12px/char (column ${tile2}..${tile2 + tileW - 1})`);
+  L.push(`//   eCO2 / TVOC "%u"    -> "65535"     5 chars = ${wNum}px @ 12px/char (columns ${tile1}..${tile1 + tileW - 1}, ${tile2}..${tile2 + tileW - 1})`);
+  L.push(`//   AQI digit           -> "5"         1 char  = ${wDigit}px @ size 2`);
+  L.push(`//   AQI status word     -> "很差/未知" 2 glyphs = ${wStatus}px @ size 1`);
+  L.push("// ============================================================================");
+  L.push("");
+  L.push("namespace Layout");
+  L.push("{");
+  L.push("    // ---- Screen bounds -----------------------------------------------------");
+  L.push("    constexpr int SCREEN_WIDTH = 128; // OLED width: valid x range 0..127");
+  L.push("    constexpr int SCREEN_HEIGHT = 64; // OLED height: valid y range 0..63");
+  L.push("");
+  L.push("    // ---- Two-column data grid ----------------------------------------------");
+  L.push("    // Both data pages use the same 2 x 64px columns:");
+  L.push("    //   climate: [温度] [湿度]      air: [eCO2] [TVOC]");
+  L.push(`    constexpr int TILE1_X = ${tile1};  // Left column origin X: "eCO2" label / eCO2 value / "AQI"`);
+  L.push(`    constexpr int TILE2_X = ${tile2}; // Right column origin X: "TVOC" label / TVOC value`);
+  L.push(`    constexpr int TILE_W = ${tileW};  // Column width: values are <= ${wNum}px wide, must stay within ${tileW}px`);
+  L.push("");
+  L.push("    // Label band: a 12px CJK label (rows 4..15) or an 8px ASCII label");
+  L.push("    // (rows 8..15). The unit (8px) sits on the same baseline, right after");
+  L.push("    // the label.");
+  L.push(`    constexpr int CJK_LABEL_Y = ${cjkLabelY};    // Top row of CJK label: "温度"(x=${left(cLabelT)}), "湿度"(x=${left(cLabelH)}) -> rows ${cjkLabelY}..${climLabelBottom}`);
+  L.push(`    constexpr int ASCII_LABEL_Y = ${asciiLabelY};  // Top row of ASCII label: "eCO2"(x=${left(aLabelC)}), "TVOC"(x=${left(aLabelV)}) -> rows ${asciiLabelY}..${asciiLabelBottom}`);
+  L.push(`    constexpr int UNIT_Y = ${unitY};         // Top row of air-page units: "ppm"(x=${left(aUnitC)}), "ppb"(x=${left(aUnitV)}) -> rows ${unitY}..${unitY + 7}`);
+  L.push(`    constexpr int LABEL_UNIT_GAP = ${labelUnitGap}; // Tightest label->unit gap (climate ${climateGap}px, air ${airGap}px)`);
+  L.push("");
+  L.push("    // ---- 温湿度页: two columns, 1px inner margins --------------------------");
+  L.push(`    constexpr int CLIMATE_TEMP_LABEL_X = ${left(cLabelT)}; // Left edge of "温度" -> ${range(cLabelT)}`);
+  L.push(`    constexpr int CLIMATE_TEMP_UNIT_X = ${left(cUnitT)};  // Left edge of "°C"   -> ${range(cUnitT)}`);
+  L.push(`    constexpr int CLIMATE_TEMP_UNIT_Y = ${cUnitT.y};  // Top row of "°C"    -> rows ${cUnitT.y}..${cUnitT.y + 7}`);
+  L.push(`    constexpr int CLIMATE_TEMP_VALUE_X = ${tempValueX}; // Left edge of "-45.5" (${wTemp}px) -> ${tempValueX}..${tempValueX + wTemp - 1}`);
+  L.push(`    constexpr int CLIMATE_HUM_LABEL_X = ${left(cLabelH)}; // Left edge of "湿度" -> ${range(cLabelH)}`);
+  L.push(`    constexpr int CLIMATE_HUM_UNIT_X = ${left(cUnitH)};  // Left edge of "%"   -> ${range(cUnitH)}`);
+  L.push(`    constexpr int CLIMATE_HUM_UNIT_Y = ${cUnitH.y};   // Top row of "%"    -> rows ${cUnitH.y}..${cUnitH.y + 7}`);
+  L.push(`    constexpr int CLIMATE_HUM_VALUE_X = ${humValueX}; // Left edge of "100" (${wHum}px) -> ${humValueX}..${humValueX + wHum - 1}`);
+  L.push("    // Comfort word (2 CJK glyphs = 26px) is centered on the left column axis.");
+  L.push(`    constexpr int CLIMATE_STATUS_CENTER_X = ${center(cStatus)}; // Center of comfort word -> ${range(cStatus)}`);
+  L.push(`    constexpr int CLIMATE_STATUS_Y = ${cStatus.y}; // Top row of comfort word -> rows ${cStatus.y}..${cStatus.y + cjkH - 1}`);
+  L.push("");
+  L.push("    // ---- 空气质量页: two columns -------------------------------------------");
+  L.push(`    constexpr int AIR_ECO2_UNIT_X = ${left(aUnitC)}; // Left edge of "ppm" (left column, after "eCO2")`);
+  L.push(`    constexpr int AIR_TVOC_UNIT_X = ${left(aUnitV)}; // Left edge of "ppb" (right column, after "TVOC")`);
+  L.push("");
+  L.push("    // Number band: value text, 24px tall (21px ink), 12px per char.");
+  L.push(`    // Worst case ${wNum}px, column ${tileW}px.`);
+  L.push(`    constexpr int VALUE_Y = ${valueY}; // Top row of value -> rows ${valueY}..${valueBottom}`);
+  L.push("");
+  L.push("    // ---- AQI row -----------------------------------------------------------");
+  L.push('    // Row reads: "AQI" + digit, then "质量" + the right-aligned status word.');
+  L.push(`    constexpr int AQI_LABEL_Y = ${aAqiL.y};       // Top row of "AQI" (x=${left(aAqiL)}), 8px tall -> rows ${aAqiL.y}..${aAqiL.y + 7}`);
+  L.push(`    constexpr int AQI_DIGIT_X = ${aqiDigitX};       // Left edge of AQI digit -> ${range(aAqiD)}`);
+  L.push(`    constexpr int AQI_DIGIT_Y = ${aAqiD.y};       // Top row of AQI digit, size 2 -> rows ${aAqiD.y}..${aqiDigitBottom}`);
+  L.push(`    constexpr int AQI_QUALITY_X = ${left(aQuality)};     // Left edge of "质量" -> ${range(aQuality)}`);
+  L.push(`    constexpr int AQI_STATUS_Y = ${aAqiW.y};      // Top row of status word -> rows ${aAqiW.y}..${aAqiW.y + cjkH - 1}`);
+  L.push(`    constexpr int AQI_STATUS_RIGHT = ${aqiStatusRight}; // Right edge of status word -> ${aqiStatusRight - wStatus}..${aqiStatusRight - 1} (worst case)`);
+  L.push("");
+  L.push("    // ---- 表情页: full-screen expression bitmap (ui_face_bitmaps.h) ----------");
+  L.push("    // Intentionally headerless: the frames are standalone full-screen art.");
+  L.push("}");
+  L.push("");
+  return { text: L.join("\n"), notes };
+}
+
+function downloadText(name, text){
+  const blob = new Blob([text], { type: "text/x-chdr;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportHeader(){
+  const { text, notes } = buildHeader();
+  const name = "ui_layout.h";
+  const suffix = notes.length ? `（${notes.length} 处共享常量冲突，见文件头注释）` : "";
+
+  if (typeof window.showSaveFilePicker === "function") {
+    try {
+      const handle = await window.showSaveFilePicker({
+        id: "co2-ui-layout",
+        suggestedName: name,
+        types: [{ description: "C++ header", accept: { "text/x-chdr": [".h"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      toast(`ui_layout.h 已导出${suffix}`);
+      return;
+    } catch (err) {
+      if (err && err.name === "AbortError") { toast("已取消导出"); return; }
+      console.warn("File System Access 不可用，改为下载：", err);
+    }
+  }
+  downloadText(name, text);
+  toast(`已下载 ui_layout.h${suffix}`);
+}
+
+function updateExport(){
+  if (state.preview === "header") {
+    $("exportPreview").textContent = buildHeader().text;
+    return;
+  }
+  $("exportPreview").textContent = JSON.stringify(exportPayload(), null, 2);
 }
 
 // ---- Rulers / zoom --------------------------------------------------------
@@ -1089,8 +1334,15 @@ function bindToolbar(){
     toast("PNG 已导出（768×384）");
   });
 
+  $("btnHeader").addEventListener("click", exportHeader);
+
+  $("previewMode").addEventListener("change", (e) => {
+    state.preview = e.target.value === "header" ? "header" : "json";
+    updateExport();
+  });
+
   $("btnCopy").addEventListener("click", async () => {
-    const text = JSON.stringify(updateExport(), null, 2);
+    const text = JSON.stringify(exportPayload(), null, 2);
     try {
       await navigator.clipboard.writeText(text);
       toast("布局 JSON 已复制");
