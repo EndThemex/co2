@@ -7,8 +7,9 @@
 //   1 "空气质量" : eCO2 + TVOC + AQI
 //   2 "表情"     : animated face reflecting air/comfort (see ui_face.h)
 //
-// Anti-overlap rule: numbers are RIGHT-ALIGNED into fixed slots sized for the
-// longest possible value (see ui_layout.h), units live in their own column.
+// Anti-overlap rule: each data page uses two 64px columns. Label + unit share
+// one line above the number; the number is LEFT-aligned in its column and is
+// sized for the longest possible value (see ui_layout.h).
 // ============================================================================
 
 #include "ui_pages.h"
@@ -91,95 +92,67 @@ namespace Ui
         c.draw_text(rightEdge - Canvas::text_width(s, size), y, size, s);
     }
 
-    // Header: title left, "n/N" indicator right-aligned, separator line.
-    static void draw_header(Canvas &c, const char *title, uint8_t pageIdx)
-    {
-        c.draw_text(0, Layout::HEADER_TEXT_Y, 1, title);
-
-        char indicator[8];
-        std::snprintf(indicator, sizeof(indicator), "%u/%u",
-                      (unsigned)(pageIdx + 1), (unsigned)PAGE_COUNT);
-        draw_text_right(c, SCREEN_WIDTH, Layout::HEADER_TEXT_Y, 1, indicator);
-
-        c.draw_line(0, Layout::HEADER_LINE_Y, SCREEN_WIDTH - 1,
-                    Layout::HEADER_LINE_Y);
-    }
-
     // ========================================================================
     // Page 0: Climate — temperature & humidity
     // ========================================================================
-    static void draw_climate(Canvas &c, const SensorData &d, uint8_t pageIdx,
-                             uint32_t /*now_ms*/)
+    static void draw_climate(Canvas &c, const SensorData &d,
+                             uint8_t /*pageIdx*/, uint32_t /*now_ms*/)
     {
-        draw_header(c, "温湿度", pageIdx);
-
-        // Temperature row: number right-aligned in [54..114], unit at 116.
-        c.draw_text(0, Layout::ROW1_Y + Layout::LABEL_DY, 1, "温度");
+        // Left column: temperature. Label + unit share the label line; the
+        // 5-char worst case ("-45.5" = 60px) still fits the 64px column.
+        c.draw_text(Layout::CLIMATE_TEMP_LABEL_X, Layout::CJK_LABEL_Y, 1, "温度");
+        c.draw_text(Layout::CLIMATE_TEMP_UNIT_X, Layout::CLIMATE_TEMP_UNIT_Y, 1,
+                    "\xF8"
+                    "C");
 
         char num[8];
         std::snprintf(num, sizeof(num), "%.1f", d.temperature);
-        draw_text_right(c, Layout::CLIMATE_NUM_RIGHT, Layout::ROW1_Y, 2, num);
+        c.draw_value(Layout::CLIMATE_TEMP_VALUE_X, Layout::VALUE_Y, num);
 
-        c.draw_text(Layout::CLIMATE_UNIT_X, Layout::ROW1_Y + Layout::UNIT_DY,
-                    1, "\xF8"
-                       "C");
-
-        // Humidity row: number right-aligned in [78..114], unit at 116.
-        c.draw_text(0, Layout::ROW2_Y + Layout::LABEL_DY, 1, "湿度");
+        // Right column: humidity. "100" = 36px, well inside 64px.
+        c.draw_text(Layout::CLIMATE_HUM_LABEL_X, Layout::CJK_LABEL_Y, 1, "湿度");
+        c.draw_text(Layout::CLIMATE_HUM_UNIT_X, Layout::CLIMATE_HUM_UNIT_Y, 1, "%");
 
         std::snprintf(num, sizeof(num), "%.0f", d.humidity);
-        draw_text_right(c, Layout::CLIMATE_NUM_RIGHT, Layout::ROW2_Y, 2, num);
+        c.draw_value(Layout::CLIMATE_HUM_VALUE_X, Layout::VALUE_Y, num);
 
-        c.draw_text(Layout::CLIMATE_UNIT_X, Layout::ROW2_Y + Layout::UNIT_DY,
-                    1, "%");
-
-        // Footer: comfort status centered as a status bar, divider lines
-        // filling the space to both screen edges.
+        // Status band: the comfort word, centered on the left column axis.
         const char *status = comfortText(comfort_category(d.temperature, d.humidity));
         const int sw = Canvas::text_width(status, 1);
-        const int sx = (SCREEN_WIDTH - sw) / 2;
-        c.draw_line(0, Layout::CLIMATE_STATUS_LINE_Y, sx - 5,
-                    Layout::CLIMATE_STATUS_LINE_Y);
-        c.draw_text(sx, Layout::CLIMATE_STATUS_Y, 1, status);
-        c.draw_line(sx + sw + 4, Layout::CLIMATE_STATUS_LINE_Y,
-                    SCREEN_WIDTH - 1, Layout::CLIMATE_STATUS_LINE_Y);
+        c.draw_text(Layout::CLIMATE_STATUS_CENTER_X - sw / 2, Layout::CLIMATE_STATUS_Y,
+                    1, status);
     }
 
     // ========================================================================
     // Page 1: Air Quality — eCO2, TVOC, AQI
     // ========================================================================
-    static void draw_air(Canvas &c, const SensorData &d, uint8_t pageIdx,
-                         uint32_t /*now_ms*/)
+    static void draw_air(Canvas &c, const SensorData &d,
+                         uint8_t /*pageIdx*/, uint32_t /*now_ms*/)
     {
-        draw_header(c, "空气质量", pageIdx);
-
         char num[8];
 
-        // eCO2 row: number right-aligned in [48..108], unit at 110.
-        c.draw_text(0, Layout::ROW1_Y + Layout::LABEL_DY, 1, "eCO2");
+        // Left column: eCO2. "65535" = 60px, inside the 64px column.
+        c.draw_text(Layout::TILE1_X, Layout::ASCII_LABEL_Y, 1, "eCO2");
+        c.draw_text(Layout::AIR_ECO2_UNIT_X, Layout::UNIT_Y, 1, "ppm");
         std::snprintf(num, sizeof(num), "%u", (unsigned)d.eco2);
-        draw_text_right(c, Layout::AIR_NUM_RIGHT, Layout::ROW1_Y, 2, num);
-        c.draw_text(Layout::AIR_UNIT_X, Layout::ROW1_Y + Layout::UNIT_DY,
-                    1, "ppm");
+        c.draw_value(Layout::TILE1_X, Layout::VALUE_Y, num);
 
-        // TVOC row: number right-aligned in [48..108], unit at 110.
-        c.draw_text(0, Layout::ROW2_Y + Layout::LABEL_DY, 1, "TVOC");
+        // Right column: TVOC.
+        c.draw_text(Layout::TILE2_X, Layout::ASCII_LABEL_Y, 1, "TVOC");
+        c.draw_text(Layout::AIR_TVOC_UNIT_X, Layout::UNIT_Y, 1, "ppb");
         std::snprintf(num, sizeof(num), "%u", (unsigned)d.tvoc);
-        draw_text_right(c, Layout::AIR_NUM_RIGHT, Layout::ROW2_Y, 2, num);
-        c.draw_text(Layout::AIR_UNIT_X, Layout::ROW2_Y + Layout::UNIT_DY,
-                    1, "ppb");
+        c.draw_value(Layout::TILE2_X, Layout::VALUE_Y, num);
 
-        // AQI row: digit sits right after the "AQI" label; status word
-        // right-aligned to the screen edge.
-        c.draw_text(0, Layout::ROW3_Y + Layout::LABEL_DY, 1, "AQI");
+        // Status band: the AQI row.
+        c.draw_text(Layout::TILE1_X, Layout::AQI_LABEL_Y, 1, "AQI");
 
         char digit[2] = {'-', '\0'};
         if (d.aqi >= 1 && d.aqi <= 5)
             digit[0] = (char)('0' + d.aqi);
-        c.draw_text(Layout::AQI_DIGIT_X, Layout::ROW3_Y, 2, digit);
+        c.draw_text(Layout::AQI_DIGIT_X, Layout::AQI_DIGIT_Y, 2, digit);
 
-        draw_text_right(c, Layout::AQI_STATUS_RIGHT,
-                        Layout::ROW3_Y + Layout::LABEL_DY, 1,
+        c.draw_text(Layout::AQI_QUALITY_X, Layout::AQI_STATUS_Y, 1, "质量");
+        draw_text_right(c, Layout::AQI_STATUS_RIGHT, Layout::AQI_STATUS_Y, 1,
                         aqiShort(d.aqi));
     }
 

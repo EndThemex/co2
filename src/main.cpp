@@ -43,7 +43,8 @@ struct OffsetSegment
 static const OffsetSegment TEMP_OFFSET_TABLE[] = {
     {15.0f, -3.5f},   // 原始温度 ≤15°C
     {25.0f, -5.0f},   // 15~25°C
-    {INFINITY, -6.0f} // >25°C
+    {30.0f, -6.5f},   // 25~30°C
+    {INFINITY, -8.0f} // >30°C
 };
 
 // 湿度偏移表：按 AHT30 原始湿度分段 (%RH)，温度虚高会使 RH 系统性偏低
@@ -66,12 +67,12 @@ static float lookupOffset(const OffsetSegment (&table)[N], float value)
 }
 
 // ====== 界面分页参数 ======
-#define PAGE_INTERVAL_MS 8000  // 每页停留时间（ms）
-#define SENSOR_PERIOD_MS 1000  // 传感器读取/情绪评估周期（ms）
-#define MOOD_FRAME_MS 33       // 表情页动画帧间隔（~30fps；差分刷新使静止帧
-                               // 仅有 1KB memcmp 开销，I2C 只在实际画面
-                               // 变化时才传输）
-#define DATA_FRAME_MS 500      // 数据页重绘间隔
+#define PAGE_INTERVAL_MS 8000 // 每页停留时间（ms）
+#define SENSOR_PERIOD_MS 1000 // 传感器读取/情绪评估周期（ms）
+#define MOOD_FRAME_MS 33      // 表情页动画帧间隔（~30fps；差分刷新使静止帧
+                              // 仅有 1KB memcmp 开销，I2C 只在实际画面
+                              // 变化时才传输）
+#define DATA_FRAME_MS 500     // 数据页重绘间隔
 
 // ============================================================================
 // 对象声明

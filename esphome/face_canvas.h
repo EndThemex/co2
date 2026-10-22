@@ -47,6 +47,7 @@ public:
     }
 
     void draw_text(int, int, int, const char *) override {} // 未使用
+    void draw_value(int, int, const char *) override {}     // 未使用（数据页由 YAML 自绘）
     void draw_line(int, int, int, int) override {}          // 未使用
     void flush() override {}                                // ESPHome 自动推屏
 

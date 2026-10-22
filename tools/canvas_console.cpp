@@ -229,6 +229,30 @@ void ConsoleCanvas::draw_text(int x, int y, int size, const char *s)
     }
 }
 
+void ConsoleCanvas::draw_value(int x, int y, const char *s)
+{
+    if (!s)
+        return;
+    // Numeric values: 5x7 glyphs scaled 2x in X (12px advance) and 3x in Y,
+    // matching OledCanvas::draw_value().
+    constexpr int sx = Canvas::VALUE_SCALE_X;
+    constexpr int sy = Canvas::VALUE_SCALE_Y;
+    int cx = x;
+    for (const char *p = s; *p; ++p)
+    {
+        const unsigned char *glyph = font5x7_or_default(*p);
+        for (int col = 0; col < 5; ++col)
+            for (int row = 0; row < 7; ++row)
+                if (glyph[col] & (1 << row))
+                    for (int dy = 0; dy < sy; ++dy)
+                        for (int dx = 0; dx < sx; ++dx)
+                            set_pixel(cx + col * sx + dx, y + row * sy + dy);
+        cx += 6 * sx;
+        if (cx >= W)
+            break;
+    }
+}
+
 void ConsoleCanvas::flush()
 {
     // ANSI: clear screen + cursor home

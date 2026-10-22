@@ -12,7 +12,7 @@
 #   - ENS160 SparkFun 库               → sensor: platform: ens160_i2c (地址 0x53)
 #   - 原始温湿度喂 ENS160 补偿          → ens160 的 compensation 块（引用原始传感器 ID）
 #   - TEMP/HUM_OFFSET_TABLE 分段偏移    → copy 传感器 + lambda filter（仅校准值出 HA/OLED）
-#   - ui_pages.cpp 双页 UI             → display pages + lambda 重绘（布局常量照搬 ui_layout.h）
+#   - ui_pages.cpp 双页 UI             → display pages + lambda 重绘（与 ui_layout.h 双栏规则一致）
 #   - Ui::Face 表情引擎（ui_face.cpp   → esphome.includes 原样编译 + face_canvas.h 适配器，
 #     + IrisOLED 位图，硬件无关）         作为第 3 页轮播（引擎代码零改动）
 #   - PAGE_INTERVAL_MS 8000 翻页       → interval: 8s + display.page.show_next
@@ -91,8 +91,9 @@ i2c:
 # ==============================================================================
 # 字体（本地 TTF，已下载到 fonts/ 目录；gfonts 在线获取在国内网络不可用）
 # Press Start 2P 像素字体：按 8px 网格设计，size 取 8 的整数倍时最锐利
-# font_big   = 16px（每字符占宽 16px）
-# font_small =  8px（每字符占宽 8px，比原等宽字体宽，右侧单位改用 TOP_RIGHT 靠右对齐）
+# font_small =  8px（每字符占宽 8px，用于标签/单位/页码）
+# font_mid   = 20px RobotoMono（每字符占宽 12px，用于数字，5 位数 60px）
+# 数字不要用 16px Press Start 2P：每字符占宽 16px，5 位数 80px 会超出 64px 栏。
 # ==============================================================================
 font:
   - file: "fonts/PressStart2P-Regular.ttf"
@@ -101,11 +102,7 @@ font:
     glyphs: "!%+,-./0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ°abcdefghijklmnopqrstuvwxyz"
   - file: "fonts/RobotoMono-Regular.ttf"
     id: font_mid
-    size: 16
-    glyphs: "!%+,-./0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ°abcdefghijklmnopqrstuvwxyz"
-  - file: "fonts/PressStart2P-Regular.ttf"
-    id: font_big
-    size: 16
+    size: 20
     glyphs: "!%+,-./0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ°abcdefghijklmnopqrstuvwxyz"
   # 中文像素字体（缝合像素 Fusion Pixel 12px 点阵，OFL 开源，与 Press Start 2P 风格一致）
   # 只嵌入界面用到的汉字，固件体积几乎不变（源 TTF 7MB 不会进固件）
@@ -124,7 +121,7 @@ font:
 sensor:
   # ---- AHT30 原始温湿度（仅内部使用：喂 ENS160 补偿，不发布到 HA）----
   - platform: aht10
-    variant: AHT20        # AHT30 使用 AHT20 variant（协议相同，官方支持）
+    variant: AHT20 # AHT30 使用 AHT20 variant（协议相同，官方支持）
     temperature:
       id: aht_raw_temp
       internal: true
@@ -233,10 +230,14 @@ text_sensor:
     update_interval: 2s
 
 # ==============================================================================
-# OLED：SSD1306 128x64 @ 0x3C，三页轮播（布局常量照搬 ui_layout.h）
-#   标签/状态用 font_cn 中文 12px，数字 font_big 16px，单位/页码 font_small 8px
-#   数字右对齐：温湿度页 [..110]，空气质量页 [..100]，AQI [..40]
-#   单位列统一 TOP_RIGHT 对齐屏幕右缘 x=128
+# OLED：SSD1306 128x64 @ 0x3C，三页轮播（布局与 ui_layout.h 的双栏规则一致）
+#   每个数据页 = 两个 64px 栏；标签+单位同一行，数字独占整栏并左对齐。
+#   标签：font_cn 12px（中文）/ font_small 8px（ASCII）；单位：font_small 8px
+#   数字：font_mid 20px RobotoMono（12px/字符）；AQI 数字也在 x=28 左对齐
+#   无标题、无页码：整页仅数据。靠栏位标签自解释
+#   标签带 y=4（中文）/ y=8（ASCII）；单位与标签同底线（温湿度 y=8，空气 y=8）
+#   数字带 y=20..43
+#   底部状态带 y=48..59（无分隔线；AQI 数字 y=44..59）
 #   刷新 200ms（5fps）：数据页重绘开销可忽略；表情页需要 —— 眨眼/眨眼变体
 #   窗口 240ms > 周期 200ms，保证每个动画帧至少被采样一次
 # ==============================================================================
@@ -250,27 +251,24 @@ display:
       # ---- Page 1 "温湿度"（原 draw_climate）----
       - id: page_climate
         lambda: |-
-          // 页眉：中文标题 + 右对齐页码 + 分隔线（中文 12px 占 y 0..11）
-          it.print(0, 0, id(font_cn), "温湿度");
-          it.printf(128, 2, id(font_small), TextAlign::TOP_RIGHT, "1/3");
-          it.line(0, 13, 127, 13);
-          // Temp 行：数字右对齐到 x=110，单位靠右缘
-          it.print(0, 17, id(font_cn), "温度");
+          // 左栏：温度。标签+单位同一行，数字独占 64px 栏宽。
+          // 温度两字宽 24px（fusion 12px/字），单位 28 起（标签后留 3px 间隙）。
+          it.print(1, 4, id(font_cn), "温度");
+          it.print(28, 8, id(font_small), "°C");
           float t = id(temp_disp).state;
           if (isnan(t))
-            it.printf(110, 15, id(font_big), TextAlign::TOP_RIGHT, "--.-");
+            it.printf(1, 20, id(font_mid), "--.-");
           else
-            it.printf(110, 15, id(font_big), TextAlign::TOP_RIGHT, "%.1f", t);
-          it.printf(128, 15, id(font_mid), TextAlign::TOP_RIGHT, "°C");
-          // Humidity 行
-          it.print(0, 35, id(font_cn), "湿度");
+            it.printf(1, 20, id(font_mid), "%.1f", t);
+          // 右栏：湿度。标签 65 起，单位 92 起（标签后留 3px 间隙）。
+          it.print(65, 4, id(font_cn), "湿度");
+          it.print(92, 8, id(font_small), "%");
           float h = id(hum_disp).state;
           if (isnan(h))
-            it.printf(110, 33, id(font_big), TextAlign::TOP_RIGHT, "--.-");
+            it.printf(64, 20, id(font_mid), "--.-");
           else
-            it.printf(110, 33, id(font_big), TextAlign::TOP_RIGHT, "%.1f", h);
-          it.print(128, 33, id(font_mid), TextAlign::TOP_RIGHT, "%");
-          // 底部舒适度状态（text_sensor 保持英文供 HA 用，屏显映射为中文）
+            it.printf(64, 20, id(font_mid), "%.0f", h);
+          // 底部状态带：在左栏轴心 x=14 居中（text_sensor 保持英文供 HA 用）
           std::string c = id(comfort_text).state;
           const char* cc = "未知";
           if (c == "Cold") cc = "冷";
@@ -279,33 +277,33 @@ display:
           else if (c == "Humid") cc = "潮";
           else if (c == "Comfort") cc = "舒适";
           else if (c == "OK") cc = "正常";
-          it.printf(0, 52, id(font_cn), "%s", cc);
+          it.printf(14, 48, id(font_cn), TextAlign::TOP_CENTER, "%s", cc);
 
       # ---- Page 2 "空气质量"（原 draw_air）----
       - id: page_air
         lambda: |-
-          it.print(0, 0, id(font_cn), "空气质量");
-          it.printf(128, 2, id(font_small), TextAlign::TOP_RIGHT, "2/3");
-          it.line(0, 13, 127, 13);
           // ENS160 每次上电需约 3 分钟预热，预热期间读数为 NaN：整页显示提示
           if (isnan(id(eco2).state)) {
             it.printf(64, 26, id(font_cn_big), TextAlign::CENTER, "预热中");
             return;
           }
-          // eCO2 行：数字右对齐到 x=100，单位靠右缘
-          it.print(0, 19, id(font_small), "eCO2");
-          it.printf(100, 15, id(font_big), TextAlign::TOP_RIGHT, "%d", (int) id(eco2).state);
-          it.printf(128, 23, id(font_small), TextAlign::TOP_RIGHT, "ppm");
-          // TVOC 行
-          it.print(0, 37, id(font_small), "TVOC");
-          it.printf(100, 33, id(font_big), TextAlign::TOP_RIGHT, "%d", (int) id(tvoc).state);
-          it.printf(128, 41, id(font_small), TextAlign::TOP_RIGHT, "ppb");
-          // AQI 行：数字右对齐到 x=40，中文等级右对齐到屏幕右缘
-          it.print(0, 55, id(font_small), "AQI");
+          // 左栏：eCO2。标签+单位同一行，数字独占 64px 栏宽。
+          it.print(0, 8, id(font_small), "eCO2");
+          it.print(34, 8, id(font_small), "ppm");
+          it.printf(0, 20, id(font_mid), "%d", (int) id(eco2).state);
+          // 右栏：TVOC。
+          it.print(64, 8, id(font_small), "TVOC");
+          it.print(98, 8, id(font_small), "ppb");
+          it.printf(64, 20, id(font_mid), "%d", (int) id(tvoc).state);
+          // 底部状态带：AQI 标签 + 数字 + "质量"标签 + 右对齐等级词
+          it.print(0, 48, id(font_small), "AQI");
+          // ESPHome 字体度量与固件不同：20px 字形实际着墨约 15px，
+          // 数字基线上移，避免底部行被 64 行屏幕裁掉。
           if (id(aqi).state >= 1.0f && id(aqi).state <= 5.0f)
-            it.printf(40, 46, id(font_mid), TextAlign::TOP_RIGHT, "%d", (int) id(aqi).state);
+            it.printf(28, 42, id(font_mid), "%d", (int) id(aqi).state);
           else
-            it.printf(40, 46, id(font_mid), TextAlign::TOP_RIGHT, "-");
+            it.printf(28, 42, id(font_mid), "-");
+          it.print(72, 48, id(font_cn), "质量");
           const std::string& r = id(aqi_text).state;
           const char* rc = "未知";
           if (r == "Excellent") rc = "优";
@@ -313,7 +311,7 @@ display:
           else if (r == "Moderate") rc = "中";
           else if (r == "Poor") rc = "差";
           else if (r == "Unhealthy") rc = "劣";
-          it.printf(128, 51, id(font_cn), TextAlign::TOP_RIGHT, "%s", rc);
+          it.printf(126, 48, id(font_cn), TextAlign::TOP_RIGHT, "%s", rc);
 
       # ---- Page 3 "表情"（原 ui_pages.cpp 表情页 / Ui::Face 引擎）----
       # 全屏 IrisOLED 位图，无页眉页码（与固件版一致）。

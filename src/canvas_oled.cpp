@@ -63,6 +63,15 @@ void OledCanvas::draw_text(int x, int y, int size, const char *s)
     }
 }
 
+void OledCanvas::draw_value(int x, int y, const char *s)
+{
+    // Non-square glyph scaling: 12px advance, 21px ink height.
+    display_->setTextSize(Canvas::VALUE_SCALE_X, Canvas::VALUE_SCALE_Y);
+    display_->setTextColor(SSD1306_WHITE);
+    display_->setCursor(x, y);
+    display_->print(s);
+}
+
 void OledCanvas::draw_line(int x0, int y0, int x1, int y1)
 {
     display_->drawLine(x0, y0, x1, y1, SSD1306_WHITE);

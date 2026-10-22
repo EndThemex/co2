@@ -1,14 +1,25 @@
 # -*- coding: utf-8 -*-
-# One-shot layout verifier: parses ui_sim output, extracts ink runs per row,
-# and checks them against the expected element boxes derived from ui_layout.h.
-import re, subprocess, sys
+# Layout verifier for the two data pages.
+#
+# The ASCII console simulator is the reference renderer for ASCII elements, so
+# their pixels are checked 1:1 against the real ui_sim output. CJK labels are
+# checked by bounding box (ink present + no overlap) because the FontCN bitmap
+# data lives in the firmware headers, not in the simulator.
+#
+# Worst-case widths (5-digit values, longest AQI word) are checked analytically
+# against the 64px column rule; ui_sim only renders the default dataset.
+import os
+import re
+import subprocess
+import sys
 
 W, H = 128, 64
-# 5x7 font (5 column-bytes per char, bit0 = top row) — parsed directly from
-# tools/canvas_console.cpp FONT_5x7 so the model matches the simulator 1:1.
-import os
-_SRC = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "canvas_console.cpp"), encoding="utf-8").read()
+HERE = os.path.dirname(os.path.abspath(__file__))
+CJK_ADVANCE = 13
+
+# 5x7 font (5 column-bytes per char, bit0 = top row), parsed from
+# canvas_console.cpp so the model matches the simulator 1:1.
+_SRC = open(os.path.join(HERE, "canvas_console.cpp"), encoding="utf-8").read()
 _G = [tuple(int(x, 16) for x in e.split(","))
       for e in re.findall(r"\{(0x[0-9A-Fa-f]{2}(?:, ?0x[0-9A-Fa-f]{2}){4})\}",
                           re.search(r"FONT_5x7\[\]\[5\] = \{(.*?)\n\};", _SRC,
@@ -19,159 +30,173 @@ F = dict(zip(_CHARS, _G))
 assert len(F) == 95 and len(_G) == 95, "font parse incomplete: %d/%d" % (len(_G), 95)
 DEG = (0x06, 0x0F, 0x09, 0x0F, 0x06)
 
-def glyph(ch):
-    if ord(ch) == 0xF8:
-        return DEG
-    return F[ch]
 
-def char_w(ch, size):
-    return 6 * size
+def is_cjk(ch):
+    return 0x2E80 <= ord(ch)
 
-def render(text, x, y, size):
-    """Return set of (px,py) lit by ConsoleCanvas.draw_text semantics."""
+
+def text_width(text, size_x):
+    return sum(CJK_ADVANCE if is_cjk(ch) else 6 * size_x for ch in text)
+
+
+def right_x(text, right_edge, size_x):
+    return right_edge - text_width(text, size_x)
+
+
+def render_ascii(text, x, y, size_x, size_y):
+    """Pixels lit by ConsoleCanvas.draw_value/draw_text for a pure-ASCII string."""
     px_set = set()
     cx = x
     for ch in text:
-        g = glyph(ch)
+        g = DEG if ord(ch) in (0xB0, 0xF8) else F[ch]
         for col in range(5):
             bits = g[col]
             for row in range(7):
                 if bits & (1 << row):
-                    for dy in range(size):
-                        for dx in range(size):
-                            p, q = cx + col*size + dx, y + row*size + dy
+                    for dy in range(size_y):
+                        for dx in range(size_x):
+                            p, q = cx + col * size_x + dx, y + row * size_y + dy
                             if 0 <= p < W and 0 <= q < H:
                                 px_set.add((p, q))
-        cx += 6 * size
+        cx += 6 * size_x
     return px_set
 
-def right_x(text, right_edge, size):
-    return right_edge - len(text) * 6 * size
-
-# ---- Pages: element lists (text, x, y, size) mirroring ui_pages.cpp ----
-def header(title, idx):
-    ind = "%d/3" % (idx + 1)
-    return [(title, 0, 0, 1), (ind, right_x(ind, 128, 1), 0, 1)]  # line checked separately
-
-def page_climate(d):
-    els = header("Climate", 0)
-    t = "%.1f" % d['t']; h = "%.0f" % d['h']
-    els.append(("Temp", 0, 11+4, 1))
-    els.append((t, right_x(t, 114, 2), 11, 2))
-    els.append(("\xF8" "C", 116, 11+8, 1))
-    els.append(("Humidity", 0, 29+4, 1))
-    els.append((h, right_x(h, 114, 2), 29, 2))
-    els.append(("%", 116, 29+8, 1))
-    els.append((d['status'], 0, 53, 1))
-    return els
-
-def page_air(d):
-    els = header("Air Quality", 1)
-    e = "%u" % d['eco2']; v = "%u" % d['tvoc']
-    els.append(("eCO2", 0, 11+4, 1))
-    els.append((e, right_x(e, 108, 2), 11, 2))
-    els.append(("ppm", 110, 11+8, 1))
-    els.append(("TVOC", 0, 29+4, 1))
-    els.append((v, right_x(v, 108, 2), 29, 2))
-    els.append(("ppb", 110, 29+8, 1))
-    els.append(("AQI", 0, 47+4, 1))
-    els.append((d['digit'], right_x(d['digit'], 64, 2), 47, 2))
-    els.append((d['aqiword'], right_x(d['aqiword'], 128, 1), 47+4, 1))
-    return els
 
 def parse_sim_output(out):
-    """Extract the three 64-row pages from ui_sim --all output."""
     rows = [l[1:-1] for l in out.splitlines() if l.startswith('|') and l.endswith('|')]
     assert len(rows) == 3 * H, "expected %d rows, got %d" % (3 * H, len(rows))
     return rows[:H], rows[H:2*H], rows[2*H:]
 
-def check(page_name, expected_els, rendered_rows, hline_y, strict=True):
+
+def cjk_box(text, x, y):
+    return (x, y, x + text_width(text, 1) - 1, y + 11)
+
+
+def ascii_box(text, x, y, size_x, size_y):
+    return (x, y, x + text_width(text, size_x) - 1, y + 8 * size_y - 1)
+
+
+def page_climate(d):
+    t = "%.1f" % d['t']
+    h = "%.0f" % d['h']
+    status = d['status']
+    return [
+        ("温度", 1, 4, 1, 1),
+        ("°C", 28, 8, 1, 1),
+        (t, 1, 20, 2, 3),
+        ("湿度", 65, 4, 1, 1),
+        ("%", 92, 8, 1, 1),
+        (h, 64, 20, 2, 3),
+        (status, 14 - text_width(status, 1) // 2, 48, 1, 1),
+    ]
+
+
+def page_air(d):
+    return [
+        ("eCO2", 0, 8, 1, 1),
+        ("ppm", 26, 8, 1, 1),
+        ("%u" % d['eco2'], 0, 20, 2, 3),
+        ("TVOC", 64, 8, 1, 1),
+        ("ppb", 90, 8, 1, 1),
+        ("%u" % d['tvoc'], 64, 20, 2, 3),
+        ("AQI", 0, 48, 1, 1),
+        (d['digit'], 28, 44, 2, 2),
+        ("质量", 72, 48, 1, 1),
+        (d['aqiword'], right_x(d['aqiword'], 126, 1), 48, 1, 1),
+    ]
+
+
+def check_page(name, elements, rows):
     ok = True
-    # 1) every expected element's lit pixels must exist in the render
-    want = set()
-    for (t, x, y, s) in expected_els:
-        want |= render(t, x, y, s)
-    got = {(x, y) for y, r in enumerate(rendered_rows)
-                 for x, ch in enumerate(r) if ch == '#'}
-    # header separator line is verified separately; drop that row from diff
-    got = {(x, y) for (x, y) in got if y != hline_y}
-    line = rendered_rows[hline_y]
-    if line.count('#') != W:
-        ok = False
-        print("  header line incomplete")
-    missing = want - got
-    if missing:
-        ok = False
-        print("  MISSING ink (element drawn differently than expected):",
-              sorted(missing)[:10])
-    extra = got - want
-    if extra and strict:
-        ok = False
-        print("  UNEXPECTED ink:", sorted(extra)[:10])
-    # 3) pairwise element-box disjointness (the anti-overlap guarantee)
+
+    got = {(x, y) for y, r in enumerate(rows) for x, ch in enumerate(r) if ch == '#'}
     boxes = []
-    for (t, x, y, s) in expected_els:
-        boxes.append((t, x, y, x + len(t)*6*s - 1, y + 8*s - 1))
-    for i in range(len(boxes)):
-        for j in range(i+1, len(boxes)):
-            t1, x0, y0, x1, y1 = boxes[i]
-            t2, X0, Y0, X1, Y1 = boxes[j]
-            if x0 <= X1 and X0 <= x1 and y0 <= Y1 and Y0 <= y1:
+    for (text, x, y, sx, sy) in elements:
+        box = cjk_box(text, x, y) if any(is_cjk(ch) for ch in text) \
+            else ascii_box(text, x, y, sx, sy)
+        boxes.append((text, box))
+
+        if not any(is_cjk(ch) for ch in text):
+            missing = render_ascii(text, x, y, sx, sy) - got
+            if missing:
                 ok = False
-                print("  BOX OVERLAP: %r %r vs %r %r" % (t1, boxes[i], t2, boxes[j]))
-    print("  %s: %s" % (page_name, "OK" if ok else "FAIL"))
+                print("  MISSING %r ink at %r" % (text, sorted(missing)[:6]))
+        else:
+            x0, y0, x1, y1 = box
+            if not any((px, py) in got for px in range(x0, x1 + 1)
+                       for py in range(y0, y1 + 1)):
+                ok = False
+                print("  MISSING %r: box has no ink" % text)
+
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            t1, (a0, b0, a1, b1) = boxes[i]
+            t2, (c0, d0, c1, d1) = boxes[j]
+            if a0 <= c1 and c0 <= a1 and b0 <= d1 and d0 <= b1:
+                ok = False
+                print("  BOX OVERLAP: %r vs %r" % (t1, t2))
+
+    print("  %s: %s" % (name, "OK" if ok else "FAIL"))
     return ok
 
-# Header line overlaps nothing by geometry (title/indicator rows 0..7, line at 8),
-# excluded from pixel diff via got.discard only for the exact row; extra check:
-# no expected element touches row 8.
+
+def check_worst_case_widths():
+    ok = True
+    values = ["-45.5", "65535", "1187", "100"]
+    for v in values:
+        if text_width(v, 2) > 64:
+            ok = False
+            print("  value %r is %dpx, wider than a 64px column"
+                  % (v, text_width(v, 2)))
+
+    # Label + unit must share a 64px label line.
+    for label, unit, x in [("温度", "°C", 0), ("湿度", "%", 64),
+                           ("eCO2", "ppm", 0), ("TVOC", "ppb", 64)]:
+        used = text_width(label, 1) + 2 + text_width(unit, 1)
+        if used > 64:
+            ok = False
+            print("  %r + %r uses %dpx, wider than 64px" % (label, unit, used))
+
+    digit_end = 28 + text_width("5", 2) - 1
+    worst_status_start = right_x("很差", 126, 1)
+    if worst_status_start <= digit_end:
+        ok = False
+        print("  AQI digit (ends %d) overlaps status (starts %d)"
+              % (digit_end, worst_status_start))
+
+    quality_end = 72 + text_width("质量", 1) - 1
+    if worst_status_start <= quality_end:
+        ok = False
+        print("  AQI quality label (ends %d) overlaps status (starts %d)"
+              % (quality_end, worst_status_start))
+
+    print("  worst-case widths: %s" % ("OK" if ok else "FAIL"))
+    return ok
+
+
 cases = [
-    ("typical", {'t': 23.4, 'h': 55, 'eco2': 1742, 'tvoc': 1187, 'status': "Comfort",
-                 'digit': "4", 'aqiword': "Poor"}),
-    ("extreme", {'t': -45.5, 'h': 100, 'eco2': 65535, 'tvoc': 65535, 'status': "Comfort",
-                 'digit': "5", 'aqiword': "Unhealthy"}),
-    ("zero",    {'t': 0.0, 'h': 0, 'eco2': 0, 'tvoc': 0, 'status': "Dry",
-                 'digit': "-", 'aqiword': "Unknown"}),
+    ("typical", {'t': 23.4, 'h': 55, 'eco2': 1742, 'tvoc': 1187,
+                 'status': "舒适", 'digit': "4", 'aqiword': "差"}),
 ]
 
-all_ok = True
-for name, d in cases:
-    print("case:", name)
-    c = page_climate(d); a = page_air(d)
-    ok = True
-    for els in (c, a):
-        for (t, x, y, s) in els:
-            if y <= 8 <= y + 8*s - 1 and y != 0:
-                ok = False; print("  element %r crosses header line" % t)
-    # simulate expected vs actual using our own renderer as the reference model
-    r1 = ["." * W for _ in range(H)]; r2 = ["." * W for _ in range(H)]
-    for (t, x, y, s) in c:
-        for (px, py) in render(t, x, y, s):
-            r1[py] = r1[py][:px] + '#' + r1[py][px+1:]
-    for (t, x, y, s) in a:
-        for (px, py) in render(t, x, y, s):
-            r2[py] = r2[py][:px] + '#' + r2[py][px+1:]
-    for (px, py) in [(x, 8) for x in range(W)]:  # header line at y=8
-        r1[py] = r1[py][:px] + '#' + r1[py][px+1:]
-        r2[py] = r2[py][:px] + '#' + r2[py][px+1:]
-    ok &= check("Climate", c, r1, 8)
-    ok &= check("Air", a, r2, 8)
-    all_ok &= ok
+print("case:", cases[0][0])
+c = page_climate(cases[0][1])
+a = page_air(cases[0][1])
 
-# ---- Cross-check against REAL ui_sim render for the default dataset ----
-out = subprocess.run([os.path.join(r"d:\workspace\zheteng\ESP_Projects\co2\tools",
-                                   "ui_sim.exe"), "--all"],
-                     capture_output=True, text=True).stdout
+sim = os.path.join(HERE, "ui_sim.exe")
+out = subprocess.run([sim, "--all"], capture_output=True, text=True,
+                     encoding="utf-8", errors="replace").stdout
 sim1, sim2, sim3 = parse_sim_output(out)
-dd = cases[0][1]
-c = page_climate(dd); a = page_air(dd)
-ok1 = check("Climate(sim-real)", c, sim1, 8)
-ok2 = check("Air(sim-real)", a, sim2, 8)
-# Mood page: full-screen bitmap face, no text elements -> smoke-check only.
-ok3 = any('#' in r for r in sim3)
-if not ok3:
+
+all_ok = check_page("Climate", c, sim1)
+all_ok &= check_page("Air", a, sim2)
+all_ok &= check_worst_case_widths()
+
+if not any('#' in r for r in sim3):
+    all_ok = False
     print("  Mood page rendered no ink")
-all_ok &= ok1 and ok2 and ok3
+else:
+    print("  Mood: OK")
 
 print("RESULT:", "ALL OK" if all_ok else "FAILURES PRESENT")
 sys.exit(0 if all_ok else 1)

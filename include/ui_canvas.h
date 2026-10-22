@@ -23,6 +23,13 @@ public:
     // Single lit pixel; the primitive all shape helpers below build on.
     virtual void draw_pixel(int x, int y) = 0;
     virtual void draw_text(int x, int y, int size, const char *s) = 0;
+    // Numeric value text ("-45.5", "65535"): classic 5x7 glyphs scaled
+    // non-square — 2x horizontally (12px advance) and 3x vertically
+    // (21px ink in a 24px cell). Five chars = 60px, so a worst-case value
+    // still fits a 64px column while being 50% taller than size-2 text.
+    static constexpr int VALUE_SCALE_X = 2;
+    static constexpr int VALUE_SCALE_Y = 3;
+    virtual void draw_value(int x, int y, const char *s) = 0;
     virtual void draw_line(int x0, int y0, int x1, int y1) = 0;
     virtual void flush() = 0;
 
