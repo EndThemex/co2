@@ -24,6 +24,13 @@
 #define AHT30_ADDRESS 0x38
 #define AHT30_TRIGGER_CMD 0xAC
 
+// BH1750 光照传感器（ADDR 引脚接 GND -> 默认地址 0x23，总线上无冲突）
+#define BH1750_ADDRESS 0x23
+#define BH1750_POWER_ON 0x01     // 上电（等待上电稳定）
+#define BH1750_RESET 0x07        // 清零照度寄存器（仅连续模式有效）
+#define BH1750_CONT_HRES 0x10    // 连续高分辨率模式：1 lx 分辨率，测量周期 ~120ms
+#define BH1750_LUX_DENOM 1.2f    // 原始计数 -> lx 的换算分母
+
 // ====== OLED 屏幕定义 ======
 #define OLED_ADDR 0x3C
 #define OLED_RESET -1
@@ -86,6 +93,7 @@ OledCanvas oled(&display);
 // ============================================================================
 float temperature = 0, humidity = 0;         // AHT30 原始值 → ENS160 补偿
 float temperatureDisp = 0, humidityDisp = 0; // 校准值 → OLED 显示
+uint16_t lux = 0;                            // BH1750 光照强度 (lx)
 uint16_t tvoc = 0, eco2 = 0;
 uint8_t aqi = 0;
 
@@ -135,6 +143,38 @@ bool readAHT30(float *temperature, float *humidity)
 }
 
 // ============================================================================
+// BH1750 直读（连续高分辨率模式，初始化后每次直接读 2 字节即可）
+// ============================================================================
+bool initBH1750()
+{
+    Wire.beginTransmission(BH1750_ADDRESS);
+    Wire.write(BH1750_POWER_ON);
+    if (Wire.endTransmission() != 0)
+        return false;
+    delay(10);
+
+    Wire.beginTransmission(BH1750_ADDRESS);
+    Wire.write(BH1750_RESET);
+    if (Wire.endTransmission() != 0)
+        return false;
+
+    Wire.beginTransmission(BH1750_ADDRESS);
+    Wire.write(BH1750_CONT_HRES);
+    return Wire.endTransmission() == 0;
+}
+
+bool readBH1750(uint16_t *outLux)
+{
+    Wire.requestFrom(BH1750_ADDRESS, 2);
+    if (Wire.available() < 2)
+        return false;
+
+    uint16_t raw = ((uint16_t)Wire.read() << 8) | Wire.read();
+    *outLux = (uint16_t)(raw / BH1750_LUX_DENOM);
+    return true;
+}
+
+// ============================================================================
 // 显示刷新
 // ============================================================================
 void updateDisplay(uint32_t now)
@@ -142,7 +182,7 @@ void updateDisplay(uint32_t now)
     if (currentPage >= Ui::PAGE_COUNT)
         currentPage = 0;
 
-    Ui::SensorData s{temperatureDisp, humidityDisp, tvoc, eco2, aqi};
+    Ui::SensorData s{temperatureDisp, humidityDisp, lux, tvoc, eco2, aqi};
     oled.clear();
     Ui::PAGES[currentPage].draw(oled, s, currentPage, now);
     oled.flush();
@@ -187,6 +227,16 @@ void setup()
         ens160.setOperatingMode(SFE_ENS160_STANDARD);
     }
 
+    if (!initBH1750())
+    {
+        Serial.println("BH1750 not detected!");
+    }
+    else
+    {
+        Serial.println("BH1750 OK");
+        delay(180); // 高分辨率模式首次测量最长需 ~180ms
+    }
+
     Serial.println("Ready...");
     delay(1000);
     lastPageSwitchMs = millis();
@@ -223,10 +273,12 @@ void loop()
             eco2 = ens160.getECO2();
         }
 
-        Serial.printf("Page:%u | T:%.2f (disp %.2f) C | H:%.2f (disp %.2f) %% | eCO2:%u ppm | TVOC:%u ppb | AQI:%u\n",
-                      currentPage, temperature, temperatureDisp, humidity, humidityDisp, eco2, tvoc, aqi);
+        readBH1750(&lux);
 
-        Ui::SensorData s{temperatureDisp, humidityDisp, tvoc, eco2, aqi};
+        Serial.printf("Page:%u | T:%.2f (disp %.2f) C | H:%.2f (disp %.2f) %% | Lux:%u | eCO2:%u ppm | TVOC:%u ppb | AQI:%u\n",
+                      currentPage, temperature, temperatureDisp, humidity, humidityDisp, lux, eco2, tvoc, aqi);
+
+        Ui::SensorData s{temperatureDisp, humidityDisp, lux, tvoc, eco2, aqi};
         Ui::Face::update(s, now);
     }
 

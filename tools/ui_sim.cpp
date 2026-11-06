@@ -19,7 +19,8 @@
 #include <cstring>
 
 static const Ui::SensorData PREVIEW_DATA{/*temperature*/ 23.4f, /*humidity*/ 55.0f,
-                                         /*tvoc*/ 1187, /*eco2*/ 1742, /*aqi*/ 4};
+                                         /*lux*/ 843, /*tvoc*/ 1187, /*eco2*/ 1742,
+                                         /*aqi*/ 4};
 
 // Timestamp used for the deterministic face animation. Chosen so the Mood
 // page renders a settled Sad face: hysteresis confirmed (surprise ended) and

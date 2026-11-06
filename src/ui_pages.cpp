@@ -116,11 +116,24 @@ namespace Ui
         std::snprintf(num, sizeof(num), "%.0f", d.humidity);
         c.draw_value(Layout::CLIMATE_HUM_VALUE_X, Layout::VALUE_Y, num);
 
-        // Status band: the comfort word, centered on the left column axis.
+        // Status band: the comfort word, centered on the left column axis;
+        // the light reading occupies the free right part of the band.
         const char *status = comfortText(comfort_category(d.temperature, d.humidity));
         const int sw = Canvas::text_width(status, 1);
         c.draw_text(Layout::CLIMATE_STATUS_CENTER_X - sw / 2, Layout::CLIMATE_STATUS_Y,
                     1, status);
+
+        // Light: "光照" label + right-aligned value. Under 10000 lx the unit
+        // is "lx" (max "9999lx" = 36px, fits after the 26px label); brighter
+        // readings switch to "klx" to keep inside the 64px column.
+        c.draw_text(Layout::CLIMATE_LIGHT_LABEL_X, Layout::CLIMATE_STATUS_Y, 1, "光照");
+
+        char light[8];
+        if (d.lux >= 10000)
+            std::snprintf(light, sizeof(light), "%.0fklx", d.lux / 1000.0f);
+        else
+            std::snprintf(light, sizeof(light), "%ulx", (unsigned)d.lux);
+        draw_text_right(c, Layout::CLIMATE_LIGHT_VALUE_RIGHT, Layout::CLIMATE_STATUS_Y, 1, light);
     }
 
     // ========================================================================

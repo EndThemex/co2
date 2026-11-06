@@ -26,8 +26,8 @@ CELL = 12  # glyph cell in pixels
 THRESHOLD = 128  # alpha >= THRESHOLD -> lit pixel
 
 # Whitelist: every Chinese character rendered by ui_pages.cpp.
-# 温湿度 空气质量 表情 | 偏冷 偏热 干燥 潮湿 舒适 正常 | 优 良 中 差 很差 未知
-CHARS = "温湿度空气质量表情优良中差很未知偏冷热干燥潮舒适正常"
+# 温湿度 空气质量 表情 光照 | 偏冷 偏热 干燥 潮湿 舒适 正常 | 优 良 中 差 很差 未知
+CHARS = "温湿度空气质量表情光照优良中差很未知偏冷热干燥潮舒适正常"
 
 
 def render_char(font: ImageFont.FreeTypeFont, ch: str) -> list[int] | None:

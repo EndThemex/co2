@@ -14,6 +14,7 @@ namespace Ui
     {
         float temperature;
         float humidity;
+        uint16_t lux; // BH1750 光照强度 (lx)
         uint16_t tvoc;
         uint16_t eco2;
         uint8_t aqi;

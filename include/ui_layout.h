@@ -68,9 +68,13 @@ namespace Layout
     constexpr int CLIMATE_HUM_UNIT_Y = 8;   // Top row of "%"    -> rows 8..15
     constexpr int CLIMATE_HUM_VALUE_X = 64; // Left edge of "100" (36px) -> 64..99
     // Comfort word (2 CJK glyphs = 26px) is centered on the left column axis
-    // x=14 -> occupies 1..26, inside the temperature column.
+    // x=14 -> occupies 1..26, inside the temperature column. The right part
+    // of the status band is free: the light reading sits there, right-aligned.
     constexpr int CLIMATE_STATUS_CENTER_X = 14;
     constexpr int CLIMATE_STATUS_Y = 48; // Top row of climate comfort word -> rows 48..59
+    constexpr int CLIMATE_LIGHT_LABEL_X = 64;  // Left edge of "光照" -> 64..89
+    constexpr int CLIMATE_LIGHT_VALUE_RIGHT = 126; // Right edge of light value (2px margin):
+                                                   // "9999lx" (36px) -> 90..126, "66klx" -> 96..126
 
     // Air page units (firmware metrics):
     //   "eCO2" = 24px -> 24 + 2 = 26;  "TVOC" at TILE2_X -> 64 + 24 + 2 = 90

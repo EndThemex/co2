@@ -109,7 +109,7 @@ font:
   - file: "fonts/fusion-pixel-12px-monospaced-zh_hans.ttf"
     id: font_cn
     size: 12
-    glyphs: "温湿度空气质量冷干潮舒适正常预热中优良差劣未知."
+    glyphs: "温湿度空气质量偏冷干燥潮舒适正常预热中优良很差未知."
   - file: "fonts/fusion-pixel-12px-monospaced-zh_hans.ttf"
     id: font_cn_big
     size: 24
@@ -270,11 +270,12 @@ display:
             it.printf(64, 20, id(font_mid), "%.0f", h);
           // 底部状态带：在左栏轴心 x=14 居中（text_sensor 保持英文供 HA 用）
           std::string c = id(comfort_text).state;
+          // 与固件 comfortText() 一致：双字状态词，在左栏轴心 x=14 居中
           const char* cc = "未知";
-          if (c == "Cold") cc = "冷";
-          else if (c == "Hot") cc = "热";
-          else if (c == "Dry") cc = "干";
-          else if (c == "Humid") cc = "潮";
+          if (c == "Cold") cc = "偏冷";
+          else if (c == "Hot") cc = "偏热";
+          else if (c == "Dry") cc = "干燥";
+          else if (c == "Humid") cc = "潮湿";
           else if (c == "Comfort") cc = "舒适";
           else if (c == "OK") cc = "正常";
           it.printf(14, 48, id(font_cn), TextAlign::TOP_CENTER, "%s", cc);
@@ -305,12 +306,13 @@ display:
             it.printf(28, 42, id(font_mid), "-");
           it.print(72, 48, id(font_cn), "质量");
           const std::string& r = id(aqi_text).state;
+          // 与固件 aqiShort() 一致：AQI 5 级显示"很差"
           const char* rc = "未知";
           if (r == "Excellent") rc = "优";
           else if (r == "Good") rc = "良";
           else if (r == "Moderate") rc = "中";
           else if (r == "Poor") rc = "差";
-          else if (r == "Unhealthy") rc = "劣";
+          else if (r == "Unhealthy") rc = "很差";
           it.printf(126, 48, id(font_cn), TextAlign::TOP_RIGHT, "%s", rc);
 
       # ---- Page 3 "表情"（原 ui_pages.cpp 表情页 / Ui::Face 引擎）----
