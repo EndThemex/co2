@@ -81,11 +81,17 @@ SparkFun_ENS160 ens160;
 Adafruit_SSD1306 display(Layout::SCREEN_WIDTH, Layout::SCREEN_HEIGHT, &Wire, OLED_RESET);
 OledCanvas oled(&display);
 
+// display.begin() 失败时显存缓冲可能未分配：此时必须停用所有绘制调用，
+// 否则 OledCanvas::clear()/flush() 会对 NULL 缓冲 memset/memcmp。
+static bool displayReady = false;
+
 // ============================================================================
 // 数据存储
 // ============================================================================
-float temperature = 0, humidity = 0;         // AHT30 原始值 → ENS160 补偿
-float temperatureDisp = 0, humidityDisp = 0; // 校准值 → OLED 显示
+// NaN 表示"本次没有读到有效数据"，界面据此显示占位符，避免把初值或
+// 上一次的旧值当成真实读数。
+float temperature = NAN, humidity = NAN;         // AHT30 原始值 → ENS160 补偿
+float temperatureDisp = NAN, humidityDisp = NAN; // 校准值 → OLED 显示
 uint16_t tvoc = 0, eco2 = 0;
 uint8_t aqi = 0;
 
@@ -100,6 +106,19 @@ static uint32_t lastFrameMs = 0;
 // ============================================================================
 // AHT30 直读
 // ============================================================================
+// CRC-8：poly 0x31、初值 0xFF（AHT30 数据手册），覆盖 6 字节数据、比较第 7 字节。
+static uint8_t aht30Crc8(const uint8_t *data, size_t len)
+{
+    uint8_t crc = 0xFF;
+    for (size_t i = 0; i < len; ++i)
+    {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit)
+            crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x31) : (uint8_t)(crc << 1);
+    }
+    return crc;
+}
+
 bool readAHT30(float *temperature, float *humidity)
 {
     Wire.beginTransmission(AHT30_ADDRESS);
@@ -111,15 +130,20 @@ bool readAHT30(float *temperature, float *humidity)
 
     delay(80);
 
-    Wire.requestFrom(AHT30_ADDRESS, 7);
-    if (Wire.available() < 7)
+    // 字节数不足说明本次传输不完整，直接丢弃（不要读残留数据）。
+    if (Wire.requestFrom((uint8_t)AHT30_ADDRESS, (uint8_t)7) != 7)
         return false;
 
     uint8_t data[7];
     for (int i = 0; i < 7; i++)
-        data[i] = Wire.read();
+        data[i] = (uint8_t)Wire.read();
 
-    if (data[0] & 0x80)
+    if (data[0] & 0x80) // 忙标志：转换尚未完成
+        return false;
+
+    // CRC 不一致说明数据在总线上被破坏，必须丢弃，否则错值会写进
+    // ENS160 补偿寄存器并直接上屏。
+    if (aht30Crc8(data, 6) != data[6])
         return false;
 
     uint32_t rawHumidity = ((uint32_t)data[1] << 12) |
@@ -129,8 +153,15 @@ bool readAHT30(float *temperature, float *humidity)
                               ((uint32_t)data[4] << 8) |
                               (uint32_t)data[5];
 
-    *humidity = (rawHumidity * 100.0) / 1048576.0;
-    *temperature = ((rawTemperature * 200.0) / 1048576.0) - 50.0;
+    const float h = (rawHumidity * 100.0f) / 1048576.0f;
+    const float t = ((rawTemperature * 200.0f) / 1048576.0f) - 50.0f;
+
+    // 越界值物理上不可能出现，按无效数据处理。
+    if (h < 0.0f || h > 100.0f || t < -50.0f || t > 150.0f)
+        return false;
+
+    *humidity = h;
+    *temperature = t;
     return true;
 }
 
@@ -139,6 +170,9 @@ bool readAHT30(float *temperature, float *humidity)
 // ============================================================================
 void updateDisplay(uint32_t now)
 {
+    if (!displayReady)
+        return; // 屏幕初始化失败：不要触碰可能未分配的显存缓冲
+
     if (currentPage >= Ui::PAGE_COUNT)
         currentPage = 0;
 
@@ -162,7 +196,8 @@ void setup()
     // 表情页动画帧率；AHT30/ENS160 均支持 400kHz。
     Wire.setClock(400000);
 
-    if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR))
+    displayReady = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+    if (!displayReady)
     {
         Serial.println("OLED not detected!");
     }
@@ -215,12 +250,27 @@ void loop()
             temperatureDisp = temperature + lookupOffset(TEMP_OFFSET_TABLE, temperature);
             humidityDisp = constrain(humidity + lookupOffset(HUM_OFFSET_TABLE, humidity), 0.0f, 100.0f);
         }
+        else
+        {
+            // 本周期没读到有效数据：置 NaN，界面显示占位符而不是旧值/初值
+            temperature = humidity = NAN;
+            temperatureDisp = humidityDisp = NAN;
+        }
 
-        if (ens160.checkDataStatus())
+        // getFlags() 返回 VALIDITY 字段：0 = 正常，1 = 预热，2 = 初始启动，
+        // 3 = 输出无效，0xFF = 读失败。只有正常时才采信数据，否则预热期的
+        // 出厂基线值（eCO2 400 / TVOC 0 / AQI 1）会被当成真实读数。
+        if (ens160.checkDataStatus() && ens160.getFlags() == 0)
         {
             aqi = ens160.getAQI();
             tvoc = ens160.getTVOC();
             eco2 = ens160.getECO2();
+        }
+        else
+        {
+            aqi = 0; // 无有效数据：表情页回到 Sleepy，数据页显示占位符
+            tvoc = 0;
+            eco2 = 0;
         }
 
         Serial.printf("Page:%u | T:%.2f (disp %.2f) C | H:%.2f (disp %.2f) %% | eCO2:%u ppm | TVOC:%u ppb | AQI:%u\n",

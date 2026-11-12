@@ -2,6 +2,8 @@
 
 基于 ESPHome 的空气质量监测仪固件，接入 Home Assistant。
 
+> 本目录只覆盖 ESPHome 固件；根目录 Arduino/PlatformIO 主固件的 MQTT 双向接入（上报 + 配置下发）设计见 [../docs/plan_mqtt_ha.md](../docs/plan_mqtt_ha.md)。
+
 - **硬件**: ESP32-C3（LuAT airm2m_core_esp32c3）+ AHT30 + ENS160 + SSD1306 128x64 OLED
 - **配置文件**: `co2.yaml`
 - **I2C 接线**: SDA=GPIO8, SCL=GPIO9

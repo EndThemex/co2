@@ -111,13 +111,19 @@ ENS160 传感器需要一定的预热和校准时间：
 
 ## 七、扩展功能建议
 
-### 7.1 Wi-Fi 数据上报
+### 7.1 Wi-Fi 数据上报与 Home Assistant 双向接入
 
-ESP32-C3 内置 Wi-Fi，可将数据上报至：
+ESP32-C3 内置 Wi-Fi。主固件已确定采用 **MQTT + HA MQTT Discovery** 方案：同一链路同时承担数据上报与配置下发，HA 侧无需手写 YAML 或自动化。
 
-- **Home Assistant**（通过 ESPHome 或 MQTT）
-- **ThingsBoard** 等物联网平台
-- 自建 Web 服务器
+- **上报**：温湿度、eCO₂、TVOC、AQI、舒适度，每 10s 发布状态快照，HA 自动发现实体。
+- **下发**：各页面开关、每页停留时长、统计窗口，命令主题即时生效，配置落 NVS。
+- **离线兜底**：断网或重启后按最后一次配置继续本地轮播。
+- **扩展页**：统计页（本地 24h 环形缓冲）与天气页（联网拉取，独立任务，不阻塞动画）。
+- **前提**：HA 安装 Mosquitto broker，设备使用 HA 局域网 IP 连接。
+
+完整设计（topic 清单、报文格式、实体清单、页面布局、实施阶段、风险与 TLS 兜底）见 [plan_mqtt_ha.md](plan_mqtt_ha.md)。
+
+ESPHome 方案继续使用原生 API，见 [../esphome/co2.yaml](../esphome/co2.yaml)；两套固件共享 `ui_pages.cpp` / `ui_face.cpp` / `ui_layout.h`，但 ESPHome 端坐标单独维护。
 
 ### 7.2 数据存储
 

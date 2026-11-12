@@ -16,6 +16,7 @@
 
 #include "ui_face.h"
 
+#include <cmath>
 #include <cstdio>
 
 namespace Ui
@@ -100,24 +101,35 @@ namespace Ui
     {
         // Left column: temperature. Label + unit share the label line; the
         // 5-char worst case ("-45.5" = 60px) still fits the 64px column.
+        // NaN = 本次没有读到有效数据 -> 占位符，不显示旧值/初值。
         c.draw_text(Layout::CLIMATE_TEMP_LABEL_X, Layout::CJK_LABEL_Y, 1, "温度");
         c.draw_text(Layout::CLIMATE_TEMP_UNIT_X, Layout::CLIMATE_TEMP_UNIT_Y, 1,
                     "\xF8"
                     "C");
 
         char num[8];
-        std::snprintf(num, sizeof(num), "%.1f", d.temperature);
+        if (std::isnan(d.temperature))
+            std::snprintf(num, sizeof(num), "--.-");
+        else
+            std::snprintf(num, sizeof(num), "%.1f", d.temperature);
         c.draw_value(Layout::CLIMATE_TEMP_VALUE_X, Layout::VALUE_Y, num);
 
         // Right column: humidity. "100" = 36px, well inside 64px.
         c.draw_text(Layout::CLIMATE_HUM_LABEL_X, Layout::CJK_LABEL_Y, 1, "湿度");
         c.draw_text(Layout::CLIMATE_HUM_UNIT_X, Layout::CLIMATE_HUM_UNIT_Y, 1, "%");
 
-        std::snprintf(num, sizeof(num), "%.0f", d.humidity);
+        if (std::isnan(d.humidity))
+            std::snprintf(num, sizeof(num), "--");
+        else
+            std::snprintf(num, sizeof(num), "%.0f", d.humidity);
         c.draw_value(Layout::CLIMATE_HUM_VALUE_X, Layout::VALUE_Y, num);
 
         // Status band: the comfort word, centered on the left column axis.
-        const char *status = comfortText(comfort_category(d.temperature, d.humidity));
+        // 温湿度任一无效时不判舒适度（NaN 参与比较恒为 false），显示"未知"。
+        const char *status =
+            (std::isnan(d.temperature) || std::isnan(d.humidity))
+                ? "未知"
+                : comfortText(comfort_category(d.temperature, d.humidity));
         const int sw = Canvas::text_width(status, 1);
         c.draw_text(Layout::CLIMATE_STATUS_CENTER_X - sw / 2, Layout::CLIMATE_STATUS_Y,
                     1, status);
@@ -131,16 +143,27 @@ namespace Ui
     {
         char num[8];
 
+        // aqi==0 表示 ENS160 尚无有效输出（预热 / 初始启动 / 输出无效）：
+        // 此时 DATA 寄存器是出厂基线值（eCO2 400、TVOC 0），必须显示占位符，
+        // 不能当成真实读数。
+        const bool airValid = d.aqi >= 1 && d.aqi <= 5;
+
         // Left column: eCO2. "65535" = 60px, inside the 64px column.
         c.draw_text(Layout::TILE1_X, Layout::ASCII_LABEL_Y, 1, "eCO2");
         c.draw_text(Layout::AIR_ECO2_UNIT_X, Layout::UNIT_Y, 1, "ppm");
-        std::snprintf(num, sizeof(num), "%u", (unsigned)d.eco2);
+        if (airValid)
+            std::snprintf(num, sizeof(num), "%u", (unsigned)d.eco2);
+        else
+            std::snprintf(num, sizeof(num), "--");
         c.draw_value(Layout::TILE1_X, Layout::VALUE_Y, num);
 
         // Right column: TVOC.
         c.draw_text(Layout::TILE2_X, Layout::ASCII_LABEL_Y, 1, "TVOC");
         c.draw_text(Layout::AIR_TVOC_UNIT_X, Layout::UNIT_Y, 1, "ppb");
-        std::snprintf(num, sizeof(num), "%u", (unsigned)d.tvoc);
+        if (airValid)
+            std::snprintf(num, sizeof(num), "%u", (unsigned)d.tvoc);
+        else
+            std::snprintf(num, sizeof(num), "--");
         c.draw_value(Layout::TILE2_X, Layout::VALUE_Y, num);
 
         // Status band: the AQI row.

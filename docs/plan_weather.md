@@ -4,7 +4,8 @@
 > 在 OLED 上新增一个天气页；**天气页只在 WiFi 已连接且天气数据就绪后才参与轮播**，
 > 断网后立即隐藏。
 >
-> 适用固件：`esphome/co2.yaml`（Arduino/PlatformIO 主固件本次不改动）。
+> 适用固件：`esphome/co2.yaml`。  
+> 主固件（Arduino/PlatformIO）的天气页是独立实现：MQTT 接入 + 本地拉取任务，见 [plan_mqtt_ha.md §11](plan_mqtt_ha.md#11-天气页设计)。
 
 ---
 
@@ -285,7 +286,7 @@ interval:
 | `esphome/co2.yaml`                  | ① `http_request` + `globals` 新增；② `wifi.on_connect/on_disconnect` 挂定位与隐藏逻辑；③ 新增天气拉取 interval；④ 8s 翻页 interval 改手动页序；⑤ 新增第 4 页 `page_weather` lambda；⑥ `font_cn.glyphs` 扩白名单；⑦ 原三页页码分母改动态 |
 | `esphome/secrets.yaml`              | 无新增（ip-api / Open-Meteo 均免 key；若换高德定位则需加 `amap_key`）                                                                                                                                                                   |
 | `tools/hz_common_1000.txt`          | 新增：常用字表（一次性生成，供 §6 合并脚本用）                                                                                                                                                                                          |
-| Arduino 主固件 / `include/`、`src/` | **不改**                                                                                                                                                                                                                                |
+| Arduino 主固件 / `include/`、`src/` | 本文件所述 ESPHome 实现不改；主固件天气页按 [plan_mqtt_ha.md §11](plan_mqtt_ha.md#11-天气页设计) 单独实现                                                                                                                                   |
 | `esphome/README.md`                 | 补充天气功能说明与排障（联网后生效、缺字补字方法）                                                                                                                                                                                      |
 
 可选增强（不做也不影响需求）：把 `g_city`、天气文案、温度注册为

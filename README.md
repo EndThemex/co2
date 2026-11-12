@@ -1,6 +1,6 @@
 # 室内空气质量监测仪（ESP32-C3 + ENS160 + AHT30 + OLED）
 
-采用 ESP32-C3 Mini 的室内空气质量实时监测仪，通过 ENS160 空气质量传感器与 AHT30 温湿度传感器采集数据，在 0.96 寸 SSD1306/SSD1315 OLED（128×64）上以中文界面分页显示，并提供基于 ESPHome 的 Home Assistant 接入方案。
+采用 ESP32-C3 Mini 的室内空气质量实时监测仪，通过 ENS160 空气质量传感器与 AHT30 温湿度传感器采集数据，在 0.96 寸 SSD1306/SSD1315 OLED（128×64）上以中文界面分页显示，并提供两条 Home Assistant 接入路径：已实现的 ESPHome 原生 API，以及主固件的 MQTT 双向接入（设计完成，待实现，见 [docs/plan_mqtt_ha.md](docs/plan_mqtt_ha.md)）。
 
 三页自动轮播：温湿度 → 空气质量 → 表情。表情页会根据空气质量与舒适度切换 8 种情绪，并带有眨眼、扫视与切换过渡动画。
 
@@ -71,6 +71,7 @@ co2/
 │   ├── plan.md               # 项目完整实现方案与排障手册
 │   ├── plan_ui_sim.md        # UI 抽离 + 模拟渲染器设计说明
 │   ├── plan_weather.md       # ESPHome 联网天气页实现文档（规划中）
+│   ├── plan_mqtt_ha.md       # 主固件 MQTT + Home Assistant 双向接入详细设计
 │   └── sensor-specs-scan-AHT21-ENS160.pdf  # 传感器模块规格扫描件（购买时附）
 ├── imgs/                 # 实物照片
 └── release/              # 预编译合并固件 firmware.factory.bin
@@ -80,10 +81,19 @@ co2/
 
 项目提供两套固件：
 
-1. **Arduino/PlatformIO 固件**（根目录）——本地分页显示，无需联网
-2. **ESPHome 固件**（`esphome/`）——接入 Home Assistant，编译烧录步骤详见 [esphome/README.md](esphome/README.md)
+1. **Arduino/PlatformIO 固件**（根目录）——本地分页显示；规划通过 MQTT 接入 Home Assistant（数据上报 + 页面/时长配置下发），设计见 [docs/plan_mqtt_ha.md](docs/plan_mqtt_ha.md)。当前 `release/` 中的固件仍是纯本地版本。
+2. **ESPHome 固件**（`esphome/`）——通过原生 API 接入 Home Assistant，编译烧录步骤详见 [esphome/README.md](esphome/README.md)
 
 ESPHome 方案通过 `includes` 复用同一份 `ui_pages.cpp` / `ui_face.cpp` / `ui_layout.h`；但 ESPHome 的字体度量与固件不同（单位宽度、字形着墨高度），因此页面坐标在 `esphome/co2.yaml` 内单独维护，不直接套用 `ui_layout.h` 的坐标值。
+
+### 主固件 MQTT 接入（设计完成，待实现）
+
+主固件在保留本地显示的基础上增加 WiFi + MQTT：
+
+- **上报**：温湿度、eCO₂、TVOC、AQI、舒适度，HA 通过 MQTT Discovery 自动生成实体
+- **下发**：各页面开关、停留时长、统计窗口，配置落 NVS，断网/重启仍按最后一次配置运行
+- **扩展页**：统计页（本地 24h 环形缓冲）、天气页（联网拉取，数据过期自动隐藏）
+- **前提**：HA 安装 Mosquitto broker；完整 topic、discovery 报文、实施阶段与风险见 [docs/plan_mqtt_ha.md](docs/plan_mqtt_ha.md)
 
 ### 编译与烧录（PlatformIO）
 
@@ -112,7 +122,9 @@ pio device monitor
 | 空气质量 | eCO₂（ppm）、TVOC（ppb）、AQI 等级与质量词（优/良/中/差/很差/未知） |
 | 表情     | 全屏 IrisOLED 表情：8 种情绪 + 眨眼/扫视/过渡动画                   |
 
-每页停留 8 秒自动轮播。传感器采样与情绪评估为 1 Hz；数据页每 500 ms 重绘；表情页约 30 fps。屏幕刷新采用差分策略：每帧先 `memcmp` 比较缓冲，只有画面实际变化时才通过 I²C 推屏。
+每页停留 8 秒自动轮播（接入 MQTT 后可由 HA 逐页配置开关与停留时长）。传感器采样与情绪评估为 1 Hz；数据页每 500 ms 重绘；表情页约 30 fps。屏幕刷新采用差分策略：每帧先 `memcmp` 比较缓冲，只有画面实际变化时才通过 I²C 推屏。
+
+统计页（24h 均值/极值）与天气页为规划中的扩展页，仅随主固件 MQTT 方案落地，设计见 [docs/plan_mqtt_ha.md](docs/plan_mqtt_ha.md) §10–§11。
 
 以上为 PlatformIO 固件的刷新参数；ESPHome 端由 `display` 组件的 `update_interval: 200ms` 驱动（5 fps），动画节奏相应放缓。
 

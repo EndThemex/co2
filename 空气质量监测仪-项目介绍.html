@@ -570,7 +570,7 @@ body{background:#161616;font-family:var(--font-body);font-size:16px;line-height:
         <span class="kicker">08 / FIRMWARE · 固件与生态</span>
         <h1 class="h-1">一套 UI，两种固件</h1>
       </div>
-      <p class="lead">两套固件通过 includes 共享 ui_pages / ui_face / ui_layout——按「要不要联网」选择。</p>
+      <p class="lead">两套固件通过 includes 共享 ui_pages / ui_face / ui_layout——两条联网路径：ESPHome 原生 API，或主固件规划中的 MQTT 双向接入。</p>
     </div>
     <div class="compare-table stagger">
       <div class="cmp-row cmp-header">
@@ -578,13 +578,13 @@ body{background:#161616;font-family:var(--font-body);font-size:16px;line-height:
         <span class="cmp-col">PlatformIO · <b>主固件</b></span>
         <span class="cmp-col">ESPHome · <b>智能家居</b></span>
       </div>
-      <div class="cmp-row"><span class="cmp-dim">联网</span><span>离线运行，无需配网</span><span>Wi-Fi 接入 Home Assistant</span></div>
+      <div class="cmp-row"><span class="cmp-dim">联网</span><span>本地离线；规划 MQTT 双向接入 HA</span><span>Wi-Fi 原生 API 接入 Home Assistant</span></div>
       <div class="cmp-row"><span class="cmp-dim">UI 代码</span><span>src/ui_pages.cpp + ui_face.cpp</span><span>includes 复用同一份</span></div>
       <div class="cmp-row"><span class="cmp-dim">刷新节奏</span><span>数据页 500 ms · 表情 ≈30 fps</span><span>display 200 ms 驱动（5 fps）</span></div>
       <div class="cmp-row"><span class="cmp-dim">布局坐标</span><span>include/ui_layout.h 集中管理</span><span>esphome/co2.yaml 单独维护</span></div>
       <div class="cmp-row"><span class="cmp-dim">校准策略</span><span>双轨 + 分段偏移（main.cpp）</span><span>偏移表以 lambda 写在 co2.yaml</span></div>
       <div class="cmp-row"><span class="cmp-dim">烧录方式</span><span>pio run -t upload / factory.bin 0x0</span><span>esphome compile + esptool</span></div>
-      <div class="cmp-row"><span class="cmp-dim">适合场景</span><span>桌面摆件 · 即插即用</span><span>全屋联动 · 自动化</span></div>
+      <div class="cmp-row"><span class="cmp-dim">适合场景</span><span>桌面摆件 · 也可接入 HA</span><span>全屋联动 · 自动化</span></div>
     </div>
   </section>
 
@@ -606,7 +606,7 @@ body{background:#161616;font-family:var(--font-body);font-size:16px;line-height:
         <div class="take-item"><div class="num">01</div>
           <div><h3>三步上手</h3><p><code>pio run → upload → monitor</code>；或直接烧录仓库内预编译的 <code>firmware.factory.bin</code>（从 0x0）。</p></div></div>
         <div class="take-item"><div class="num">02</div>
-          <div><h3>双固件任选</h3><p>本地桌面摆件，或接入 Home Assistant 全屋联动——共享同一套 UI 代码。</p></div></div>
+          <div><h3>双固件任选</h3><p>主固件可纯本地运行，也可通过 MQTT 双向接入 HA；ESPHome 走原生 API——共享同一套 UI 代码。</p></div></div>
         <div class="take-item"><div class="num">03</div>
           <div><h3>完全开源</h3><p>GPL-3.0：硬件清单、接线图、字模与位图工具全部公开，欢迎改造与二次开源。</p></div></div>
       </div>
